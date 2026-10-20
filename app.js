@@ -21,6 +21,8 @@ let state = load();
 let tab = "today";
 let draft = null; // profile being edited during setup
 let setupStep = 0;
+let selectedDay = todayIndex(); // weekday shown under the week strip
+const DAY_NAMES_LONG = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 function load() {
   try {
@@ -196,14 +198,14 @@ function renderSetup() {
 
 // ---------- Tabs ----------
 
-function weekStrip(p) {
+function weekStrip(p, selected) {
   const t = todayIndex();
   const byId = Object.fromEntries(p.workouts.map(w => [w.id, w]));
   return `<div class="week">` + p.week.map(d => {
     const w = d.workoutId && byId[d.workoutId];
-    const cls = ["day", w ? "train" : d.hike ? "hike" : "", d.day === t ? "today" : ""].join(" ");
+    const cls = ["day", w ? "train" : d.hike ? "hike" : "", d.day === selected ? "today" : ""].join(" ");
     const label = w ? w.name.replace("Full body", "FB").replace("Upper", "Up").replace("Lower", "Low") : d.hike ? "Flex" : "Rest";
-    return `<div class="${cls}">${d.name}<b>${esc(label)}</b></div>`;
+    return `<button class="${cls}" data-day="${d.day}">${d.day === t ? "Today" : d.name}<b>${esc(label)}</b></button>`;
   }).join("") + `</div>`;
 }
 
@@ -223,45 +225,55 @@ function workoutCard(w, withSwap) {
   </div>`;
 }
 
+// The plan for one weekday: its workout, or the flexible / rest day card.
+function dayPlan(p, d, withSwap) {
+  const t = todayIndex();
+  const day = p.week[d];
+  const byId = Object.fromEntries(p.workouts.map(w => [w.id, w]));
+  const when = d === t ? `Today · ${day.name}` : DAY_NAMES_LONG[d];
+
+  if (day.workoutId) return `<div class="eyebrow">${when}</div>` + workoutCard(byId[day.workoutId], withSwap);
+
+  if (day.hike) {
+    // Optional gym session is the full-body workout, or the first one if there is none.
+    const optional = p.workouts.find(w => w.focus === "full") || p.workouts[0];
+    return `<div class="card">
+        <div class="eyebrow">${when}</div>
+        <h2>Flexible day</h2>
+        <p class="muted">Pick what fits the chance and how you feel:</p>
+        <p><b>Hike</b><br><span class="muted small">Bring water and eat some protein afterwards.</span></p>
+        <p><b>Outdoor cardio</b><br><span class="muted small">30–60 min of easy running, cycling or brisk walking. You should still be able to talk.</span></p>
+        <p><b>Gym</b><br><span class="muted small">The optional session below. Go lighter if you are tired from the week.</span></p>
+      </div>
+      <div class="eyebrow">Optional gym</div>` + workoutCard(optional, withSwap);
+  }
+
+  let next = null;
+  for (let i = 1; i <= 7 && !next; i++) {
+    const nd = p.week[(d + i) % 7];
+    if (nd.workoutId) next = nd;
+  }
+  return `<div class="card">
+      <div class="eyebrow">${when}</div>
+      <h2>Rest day</h2>
+      <p class="muted">Recovery is when you get stronger. A walk is a good idea.</p>
+      <p class="muted small">Next workout: ${esc(byId[next.workoutId].name)} on ${DAY_NAMES_LONG[next.day]}.</p>
+    </div>`;
+}
+
+function bindDayTaps() {
+  app.querySelectorAll(".week .day").forEach(b => b.onclick = () => {
+    selectedDay = Number(b.dataset.day);
+    render();
+  });
+  app.querySelectorAll(".swap").forEach(b => b.onclick = () => openSwap(b.dataset.key, b.dataset.pattern));
+}
+
 function renderToday() {
   const p = program();
-  const t = todayIndex();
-  const day = p.week[t];
-  const byId = Object.fromEntries(p.workouts.map(w => [w.id, w]));
   title.textContent = state.profile.name ? `Hi, ${state.profile.name}` : "Today";
-
-  let main;
-  if (day.workoutId) {
-    main = `<div class="eyebrow">Today · ${day.name}</div>` + workoutCard(byId[day.workoutId], false) +
-      `<p class="muted small">Logging sets and weights arrives in the next update.</p>`;
-  } else {
-    let next = null;
-    for (let i = 1; i <= 7 && !next; i++) {
-      const d = p.week[(t + i) % 7];
-      if (d.workoutId) next = d;
-    }
-    if (day.hike) {
-      // Flexible day: optional gym session is the full-body workout, or the first one if there is none.
-      const optional = p.workouts.find(w => w.focus === "full") || p.workouts[0];
-      main = `<div class="card">
-          <div class="eyebrow">Today · ${day.name}</div>
-          <h2>Flexible day</h2>
-          <p class="muted">Pick what fits the chance and how you feel:</p>
-          <p><b>Hike</b><br><span class="muted small">Bring water and eat some protein afterwards.</span></p>
-          <p><b>Outdoor cardio</b><br><span class="muted small">30–60 min of easy running, cycling or brisk walking. You should still be able to talk.</span></p>
-          <p><b>Gym</b><br><span class="muted small">The optional session below. Go lighter if you are tired from the week.</span></p>
-        </div>
-        <div class="eyebrow">Optional gym</div>` + workoutCard(optional, false);
-    } else {
-      main = `<div class="card">
-          <div class="eyebrow">Today · ${day.name}</div>
-          <h2>Rest day</h2>
-          <p class="muted">Recovery is when you get stronger. A walk is a good idea.</p>
-        </div>
-        <div class="eyebrow">Next · ${next.name}</div>` + workoutCard(byId[next.workoutId], false);
-    }
-  }
-  app.innerHTML = `<div class="card"><h3>This week</h3>${weekStrip(p)}</div>${main}`;
+  app.innerHTML = `<div class="card">${weekStrip(p, selectedDay)}</div>${dayPlan(p, selectedDay, false)}`;
+  bindDayTaps();
 }
 
 function renderProgram() {
@@ -273,10 +285,14 @@ function renderProgram() {
     <div class="card">
       <div class="eyebrow">Your plan</div>
       <h2>${esc(goal)} · ${p.workouts.length} days a week</h2>
-      ${weekStrip(p)}
+      <p class="muted small">Tap a day to see its plan.</p>
+      ${weekStrip(p, selectedDay)}
+    </div>
+    ${dayPlan(p, selectedDay, true)}
+    <div class="card">
+      <h3>Tips</h3>
       ${p.notes.map(n => `<p class="note">${esc(n)}</p>`).join("")}
     </div>
-    ${p.workouts.map(w => workoutCard(w, true)).join("")}
     <div class="card">
       <h3>Body numbers</h3>
       <div class="stats">
@@ -286,8 +302,7 @@ function renderProgram() {
       </div>
       <p class="muted small">Protein target is 1.6 g per kg of body weight. BMI does not account for muscle, so treat it as a rough guide.</p>
     </div>`;
-
-  app.querySelectorAll(".swap").forEach(b => b.onclick = () => openSwap(b.dataset.key, b.dataset.pattern));
+  bindDayTaps();
 }
 
 function openSwap(key, pattern) {
@@ -383,6 +398,7 @@ tabbar.addEventListener("click", e => {
   const b = e.target.closest(".tab");
   if (!b) return;
   tab = b.dataset.tab;
+  selectedDay = todayIndex();
   render();
 });
 
