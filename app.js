@@ -71,8 +71,8 @@ function render() {
 
 function startSetup(fromProfile) {
   draft = fromProfile
-    ? structuredClone(fromProfile)
-    : { name: "", age: "", heightCm: "", weightKg: "", goal: "muscle", level: "returning", trainDays: [0, 2, 4], sessionMin: 60, hikeDays: [6] };
+    ? { split: "auto", ...structuredClone(fromProfile) }
+    : { name: "", age: "", heightCm: "", weightKg: "", goal: "muscle", level: "returning", split: "auto", trainDays: [0, 2, 4], sessionMin: 60, hikeDays: [6] };
   setupStep = 0;
   render();
 }
@@ -119,11 +119,13 @@ function renderSetup() {
     body = `
       <div class="card">
         <h2>Your week</h2>
-        <label>Gym days (pick 2 to 5)</label>
+        <label>Split</label>
+        ${chips("split", Object.entries(SPLITS), d.split)}
+        <label>Gym days (${d.split === "ppl_fb" ? "pick 4" : "pick 2 to 5"})</label>
         ${chips("trainDays", dayOpts, d.trainDays, true)}
         <label>Time per session</label>
         ${chips("sessionMin", [[45, "45 min"], [60, "60 min"], [75, "75 min"]], d.sessionMin)}
-        <label>Days you usually hike (optional)</label>
+        <label>Flexible days: hike, cardio or gym (optional)</label>
         ${chips("hikeDays", dayOpts, d.hikeDays, true)}
       </div>`;
   }
@@ -147,6 +149,11 @@ function renderSetup() {
       } else {
         d[key] = v;
       }
+      if (key === "split") {
+        // Push, Pull, Legs, rest, Full body, flexible Saturday, rest Sunday.
+        if (v === "ppl_fb") { d.trainDays = [0, 1, 2, 4]; d.hikeDays = [5]; }
+        return render();
+      }
       group.querySelectorAll(".chip").forEach(c => {
         const cv = isNaN(c.dataset.value) ? c.dataset.value : Number(c.dataset.value);
         c.setAttribute("aria-pressed", group.dataset.multi === "1" ? d[key].includes(cv) : d[key] === cv);
@@ -167,7 +174,8 @@ function renderSetup() {
     }
     if (setupStep === 2) {
       if (d.trainDays.length < 2 || d.trainDays.length > 5) return (err.textContent = "Pick between 2 and 5 gym days.");
-      const changedPlan = state.profile && (state.profile.trainDays.length !== d.trainDays.length || state.profile.level !== d.level || state.profile.sessionMin !== d.sessionMin);
+      if (d.split === "ppl_fb" && d.trainDays.length !== 4) return (err.textContent = "Push, Pull, Legs + Full body needs 4 gym days.");
+      const changedPlan = state.profile && (state.profile.trainDays.length !== d.trainDays.length || state.profile.level !== d.level || state.profile.sessionMin !== d.sessionMin || (state.profile.split || "auto") !== d.split);
       if (changedPlan) state.swaps = {}; // workouts were rebuilt, so old swaps no longer line up
       state.profile = d;
       draft = null;
@@ -194,7 +202,7 @@ function weekStrip(p) {
   return `<div class="week">` + p.week.map(d => {
     const w = d.workoutId && byId[d.workoutId];
     const cls = ["day", w ? "train" : d.hike ? "hike" : "", d.day === t ? "today" : ""].join(" ");
-    const label = w ? w.name.replace("Full body ", "FB ").replace("Upper", "Up").replace("Lower", "Low") : d.hike ? "Hike" : "Rest";
+    const label = w ? w.name.replace("Full body", "FB").replace("Upper", "Up").replace("Lower", "Low") : d.hike ? "Flex" : "Rest";
     return `<div class="${cls}">${d.name}<b>${esc(label)}</b></div>`;
   }).join("") + `</div>`;
 }
@@ -232,12 +240,26 @@ function renderToday() {
       const d = p.week[(t + i) % 7];
       if (d.workoutId) next = d;
     }
-    main = `<div class="card">
-        <div class="eyebrow">Today · ${day.name}</div>
-        <h2>${day.hike ? "Hike day" : "Rest day"}</h2>
-        <p class="muted">${day.hike ? "Enjoy the hike. Bring water and eat some protein afterwards." : "Recovery is when you get stronger. A walk is a good idea."}</p>
-      </div>
-      <div class="eyebrow">Next · ${next.name}</div>` + workoutCard(byId[next.workoutId], false);
+    if (day.hike) {
+      // Flexible day: optional gym session is the full-body workout, or the first one if there is none.
+      const optional = p.workouts.find(w => w.focus === "full") || p.workouts[0];
+      main = `<div class="card">
+          <div class="eyebrow">Today · ${day.name}</div>
+          <h2>Flexible day</h2>
+          <p class="muted">Pick what fits the chance and how you feel:</p>
+          <p><b>Hike</b><br><span class="muted small">Bring water and eat some protein afterwards.</span></p>
+          <p><b>Outdoor cardio</b><br><span class="muted small">30–60 min of easy running, cycling or brisk walking. You should still be able to talk.</span></p>
+          <p><b>Gym</b><br><span class="muted small">The optional session below. Go lighter if you are tired from the week.</span></p>
+        </div>
+        <div class="eyebrow">Optional gym</div>` + workoutCard(optional, false);
+    } else {
+      main = `<div class="card">
+          <div class="eyebrow">Today · ${day.name}</div>
+          <h2>Rest day</h2>
+          <p class="muted">Recovery is when you get stronger. A walk is a good idea.</p>
+        </div>
+        <div class="eyebrow">Next · ${next.name}</div>` + workoutCard(byId[next.workoutId], false);
+    }
   }
   app.innerHTML = `<div class="card"><h3>This week</h3>${weekStrip(p)}</div>${main}`;
 }
@@ -300,7 +322,8 @@ function renderProfile() {
       <p class="muted">${pr.age} years · ${pr.heightCm} cm · ${pr.weightKg} kg</p>
       <p class="muted">${esc(goal)} · ${esc(level)}</p>
       <p class="muted">Gym: ${pr.trainDays.map(d => DAY_NAMES[d]).join(", ")} · ${pr.sessionMin} min</p>
-      <p class="muted">Hikes: ${pr.hikeDays.length ? pr.hikeDays.map(d => DAY_NAMES[d]).join(", ") : "none"}</p>
+      <p class="muted">Split: ${esc(SPLITS[pr.split || "auto"])}</p>
+      <p class="muted">Flexible days: ${pr.hikeDays.length ? pr.hikeDays.map(d => DAY_NAMES[d]).join(", ") : "none"}</p>
       <button class="btn" id="edit">Edit profile</button>
     </div>
     <div class="card">

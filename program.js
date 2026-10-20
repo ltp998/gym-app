@@ -63,7 +63,16 @@ const TEMPLATES = {
     { name: "Pull", focus: "upper", slots: ["vpull", { p: "hpull", alt: "Seated cable row" }, "facepull", "biceps", "core"] },
     { name: "Legs", focus: "lower", slots: [{ p: "squat", alt: "Leg press" }, "lunge", "legcurl", "legext", "calf"] },
   ],
+  // Push / Pull / Legs + Full body on 4 gym days.
+  ppl_fb: [
+    { name: "Push", focus: "upper", slots: ["hpush", "vpush", { p: "hpush", alt: "Incline dumbbell press" }, "lateral", "triceps", "chestfly", { p: "triceps", alt: "Overhead cable extension" }] },
+    { name: "Pull", focus: "upper", slots: ["vpull", "hpull", "facepull", "biceps", { p: "hpull", alt: "One-arm dumbbell row" }, { p: "biceps", alt: "Hammer curl" }, "core"] },
+    { name: "Legs", focus: "lower", slots: ["squat", "hinge", "lunge", "legcurl", "legext", "calf", "core"] },
+    { name: "Full body", focus: "full", slots: [{ p: "squat", alt: "Leg press" }, "hpush", { p: "vpull", alt: "Close-grip lat pulldown" }, { p: "hinge", alt: "Hip thrust" }, "lateral", "core", "calf"] },
+  ],
 };
+
+const SPLITS = { auto: "Auto", ppl_fb: "Push, Pull, Legs + Full body" };
 
 // Rep ranges, sets and rest (seconds) by goal. Main = compound lifts, acc = accessories.
 const DOSES = {
@@ -99,7 +108,7 @@ function dose(pattern, profile) {
 // Build the full program: workouts plus a weekly calendar.
 function buildProgram(profile) {
   const days = Math.min(5, Math.max(2, profile.trainDays.length));
-  const templates = TEMPLATES[days];
+  const templates = profile.split === "ppl_fb" && days === 4 ? TEMPLATES.ppl_fb : TEMPLATES[days];
   const limit = MAX_EXERCISES[profile.sessionMin] || 6;
 
   const workouts = templates.map((t, i) => ({
@@ -134,7 +143,7 @@ function programNotes(profile, workouts, week) {
   }
   notes.push("Add weight when you hit the top of the rep range on every set with good form. Then start again at the bottom of the range.");
 
-  // Warn when a heavy leg day lands the day after a hike, or a hike lands the day after a leg day.
+  // Warn when a heavy leg day lands the day after a hike.
   const byId = Object.fromEntries(workouts.map(w => [w.id, w]));
   const lower = d => {
     const w = week[d].workoutId && byId[week[d].workoutId];
@@ -148,7 +157,7 @@ function programNotes(profile, workouts, week) {
     }
   }
   if (profile.hikeDays.length) {
-    notes.push("Hikes count as training. Step-ups, lunges and calf raises in this program carry over to uphill and downhill walking.");
+    notes.push("Flexible days: hike, do outdoor cardio, or go to the gym, depending on the chance and how you feel. Hikes count as training, and step-ups, lunges and calf raises carry over to uphill and downhill walking.");
   }
   return notes;
 }
@@ -161,4 +170,4 @@ function bodyStats(profile) {
   return { bmi: Math.round(bmi * 10) / 10, protein };
 }
 
-if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, buildProgram, bodyStats, DAY_NAMES };
+if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, SPLITS, buildProgram, bodyStats, DAY_NAMES };
