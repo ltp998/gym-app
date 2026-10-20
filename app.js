@@ -24,11 +24,15 @@ let setupStep = 0;
 let selectedDay = todayIndex(); // weekday shown under the week strip
 const DAY_NAMES_LONG = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
+function emptyState() {
+  return { profile: null, swaps: {}, history: [], weights: [], active: null, restEnd: null };
+}
+
 function load() {
   try {
-    return JSON.parse(localStorage.getItem(STORE_KEY)) || { profile: null, swaps: {} };
+    return { ...emptyState(), ...JSON.parse(localStorage.getItem(STORE_KEY)) };
   } catch {
-    return { profile: null, swaps: {} };
+    return emptyState();
   }
 }
 
@@ -63,9 +67,11 @@ function render() {
   }
   tabbar.hidden = false;
   for (const b of tabbar.querySelectorAll(".tab")) b.classList.toggle("active", b.dataset.tab === tab);
-  if (tab === "today") renderToday();
+  if (tab === "today") state.active ? renderSession() : renderToday();
   if (tab === "program") renderProgram();
+  if (tab === "progress") renderProgress();
   if (tab === "profile") renderProfile();
+  updateRestBar();
   window.scrollTo(0, 0);
 }
 
@@ -232,7 +238,14 @@ function dayPlan(p, d, withSwap) {
   const byId = Object.fromEntries(p.workouts.map(w => [w.id, w]));
   const when = d === t ? `Today · ${day.name}` : DAY_NAMES_LONG[d];
 
-  if (day.workoutId) return `<div class="eyebrow">${when}</div>` + workoutCard(byId[day.workoutId], withSwap);
+  // On the Today tab each workout gets a start button; the Program tab is for planning and swaps.
+  const start = (id, label) => withSwap ? "" : `<button class="btn" data-start="${id}">${label}</button>`;
+  const doneToday = d === t && state.history.some(e => e.date === todayISO());
+
+  if (day.workoutId) {
+    return `<div class="eyebrow">${when}${doneToday ? " · done ✓" : ""}</div>` + workoutCard(byId[day.workoutId], withSwap) +
+      start(day.workoutId, doneToday ? "Start again" : "Start workout");
+  }
 
   if (day.hike) {
     // Optional gym session is the full-body workout, or the first one if there is none.
@@ -245,7 +258,8 @@ function dayPlan(p, d, withSwap) {
         <p><b>Outdoor cardio</b><br><span class="muted small">30–60 min of easy running, cycling or brisk walking. You should still be able to talk.</span></p>
         <p><b>Gym</b><br><span class="muted small">The optional session below. Go lighter if you are tired from the week.</span></p>
       </div>
-      <div class="eyebrow">Optional gym</div>` + workoutCard(optional, withSwap);
+      <div class="eyebrow">Optional gym${doneToday ? " · done ✓" : ""}</div>` + workoutCard(optional, withSwap) +
+      start(optional.id, "Start gym session");
   }
 
   let next = null;
@@ -267,6 +281,7 @@ function bindDayTaps() {
     render();
   });
   app.querySelectorAll(".swap").forEach(b => b.onclick = () => openSwap(b.dataset.key, b.dataset.pattern));
+  app.querySelectorAll("[data-start]").forEach(b => b.onclick = () => startWorkout(b.dataset.start));
 }
 
 function statsCard() {
@@ -367,7 +382,7 @@ function renderProfile() {
   document.getElementById("file").onchange = importData;
   document.getElementById("reset").onclick = () => {
     if (!confirm("Delete your profile and all data on this phone?")) return;
-    state = { profile: null, swaps: {} };
+    state = emptyState();
     save();
     startSetup(null);
   };
@@ -395,7 +410,7 @@ function importData(e) {
     try {
       const data = JSON.parse(txt);
       if (!data.profile) throw new Error("no profile");
-      state = { swaps: {}, ...data };
+      state = { ...emptyState(), ...data };
       save();
       tab = "today";
       render();

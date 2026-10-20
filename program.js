@@ -172,4 +172,45 @@ function bodyStats(profile) {
   return { bmi: Math.round(bmi * 10) / 10, bmiLabel, protein };
 }
 
-if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, SPLITS, buildProgram, bodyStats, DAY_NAMES };
+// ---------- Logging helpers ----------
+
+// Top of a rep range: "6–10" -> 10, "30–45 s" -> 45.
+function topReps(reps) {
+  const nums = String(reps).match(/\d+/g);
+  return nums ? Number(nums[nums.length - 1]) : 10;
+}
+
+// Big leg lifts move up in 5 kg steps, everything else in 2.5 kg.
+function increment(pattern) {
+  return pattern === "squat" || pattern === "hinge" ? 5 : 2.5;
+}
+
+// Most recent logged sets for an exercise name, newest first in history order.
+function lastPerformance(history, name) {
+  for (let i = history.length - 1; i >= 0; i--) {
+    const ex = history[i].exercises.find(e => e.name === name && e.sets.length);
+    if (ex) return { date: history[i].date, sets: ex.sets };
+  }
+  return null;
+}
+
+// Double progression: when every set reached the top of the range, add weight; otherwise beat the reps.
+function suggestion(ex, history) {
+  const last = lastPerformance(history, ex.name);
+  if (ex.pattern === "core") return { kg: null, last, text: `Hold ${ex.reps}.` };
+  if (!last) return { kg: null, last, text: "First time: pick a weight you can lift for the top of the range with 2–3 reps left." };
+  const kg = Math.max(...last.sets.map(s => s.kg || 0));
+  const top = topReps(ex.reps);
+  const hitTop = last.sets.length >= ex.sets && last.sets.every(s => s.reps >= top);
+  if (kg > 0 && hitTop) {
+    const inc = increment(ex.pattern);
+    return { kg: kg + inc, last, text: `You hit ${top} reps on every set. Add ${inc} kg.` };
+  }
+  return { kg: kg || null, last, text: kg ? `Stay at ${kg} kg and beat last time's reps.` : "Beat last time's reps." };
+}
+
+function sessionVolume(entry) {
+  return Math.round(entry.exercises.reduce((sum, e) => sum + e.sets.reduce((s2, st) => s2 + (st.kg || 0) * (st.reps || 0), 0), 0));
+}
+
+if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, SPLITS, buildProgram, bodyStats, DAY_NAMES, topReps, suggestion, lastPerformance, sessionVolume };
