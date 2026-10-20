@@ -167,7 +167,9 @@ function bodyStats(profile) {
   const bmi = profile.weightKg / (h * h);
   // 1.6 g/kg/day is the point above which extra protein shows little added muscle gain (Morton et al., 2018).
   const protein = Math.round(profile.weightKg * 1.6);
-  return { bmi: Math.round(bmi * 10) / 10, protein };
+  // WHO adult BMI categories.
+  const bmiLabel = bmi < 18.5 ? "underweight" : bmi < 25 ? "normal" : bmi < 30 ? "overweight" : "obese";
+  return { bmi: Math.round(bmi * 10) / 10, bmiLabel, protein };
 }
 
 if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, SPLITS, buildProgram, bodyStats, DAY_NAMES };

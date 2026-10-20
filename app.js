@@ -269,16 +269,35 @@ function bindDayTaps() {
   app.querySelectorAll(".swap").forEach(b => b.onclick = () => openSwap(b.dataset.key, b.dataset.pattern));
 }
 
+function statsCard() {
+  const pr = state.profile;
+  const s = bodyStats(pr);
+  const hours = Math.round(pr.trainDays.length * pr.sessionMin / 6) / 10;
+  return `<div class="card">
+      <h3>Your numbers</h3>
+      <div class="stats">
+        <div class="stat"><b>${s.bmi}</b><span>BMI · ${s.bmiLabel}</span></div>
+        <div class="stat"><b>${s.protein} g</b><span>protein a day</span></div>
+        <div class="stat"><b>${pr.trainDays.length}× · ${hours} h</b><span>gym a week</span></div>
+        <div class="stat"><b>7–9 h</b><span>sleep a night</span></div>
+      </div>
+      <p class="muted small">Protein: 1.6 g per kg of body weight (${pr.weightKg} kg), for example about ${Math.round(s.protein / 4)} g in each of 4 meals. BMI does not account for muscle, so treat it as a rough guide. Sleep is when muscles recover.</p>
+    </div>`;
+}
+
 function renderToday() {
   const p = program();
+  const t = todayIndex();
   title.textContent = state.profile.name ? `Hi, ${state.profile.name}` : "Today";
-  app.innerHTML = `<div class="card">${weekStrip(p, selectedDay)}</div>${dayPlan(p, selectedDay, false)}`;
+  const back = selectedDay !== t ? `<button class="btn secondary" id="to-today">Back to today</button>` : "";
+  app.innerHTML = `<div class="card">${weekStrip(p, selectedDay)}${back}</div>${dayPlan(p, selectedDay, false)}${statsCard()}`;
   bindDayTaps();
+  const b = document.getElementById("to-today");
+  if (b) b.onclick = () => { selectedDay = t; render(); };
 }
 
 function renderProgram() {
   const p = program();
-  const s = bodyStats(state.profile);
   const goal = GOALS.find(g => g[0] === state.profile.goal)[1];
   title.textContent = "Program";
   app.innerHTML = `
@@ -293,15 +312,7 @@ function renderProgram() {
       <h3>Tips</h3>
       ${p.notes.map(n => `<p class="note">${esc(n)}</p>`).join("")}
     </div>
-    <div class="card">
-      <h3>Body numbers</h3>
-      <div class="stats">
-        <div class="stat"><b>${s.bmi}</b><span>BMI</span></div>
-        <div class="stat"><b>${s.protein} g</b><span>protein / day</span></div>
-        <div class="stat"><b>${state.profile.weightKg} kg</b><span>weight</span></div>
-      </div>
-      <p class="muted small">Protein target is 1.6 g per kg of body weight. BMI does not account for muscle, so treat it as a rough guide.</p>
-    </div>`;
+    ${statsCard()}`;
   bindDayTaps();
 }
 
