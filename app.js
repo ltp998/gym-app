@@ -342,8 +342,10 @@ function renderToday() {
   const t = todayIndex();
   title.textContent = state.profile.name ? `Hi, ${state.profile.name}` : "Today";
   const back = selectedDay !== t ? `<button class="btn secondary" id="to-today">Back to today</button>` : "";
-  app.innerHTML = `<div class="card">${weekStrip(p, selectedDay)}${back}</div>${dayPlan(p, selectedDay, false)}${statsCard()}`;
+  app.innerHTML = `${backupNudge()}<div class="card">${weekStrip(p, selectedDay)}${back}</div>${dayPlan(p, selectedDay, false)}${statsCard()}`;
   bindDayTaps();
+  const nb = document.getElementById("nudge-backup");
+  if (nb) nb.onclick = exportData;
   const b = document.getElementById("to-today");
   if (b) b.onclick = () => { selectedDay = t; render(); };
 }
@@ -406,7 +408,8 @@ function renderProfile() {
     </div>
     <div class="card">
       <h3>Backup</h3>
-      <p class="muted small">Your data lives only on this phone. Save a backup file now and then so you do not lose it.</p>
+      <p class="muted small">Your data lives only on this phone. If you delete the app from the home screen or clear Safari data, it is gone. Save a backup to Files or iCloud Drive once a week.</p>
+      <p class="muted small">Last backup: <b>${state.lastBackup ? fmtDate(state.lastBackup) : "never"}</b> · ${state.history.length} workouts, ${state.weights.length} weigh-ins</p>
       <button class="btn secondary" id="export">Save backup</button>
       <button class="btn secondary" id="import">Restore backup</button>
       <input type="file" id="file" accept="application/json,.json" hidden>
@@ -426,18 +429,38 @@ function renderProfile() {
 }
 
 async function exportData() {
-  const name = `gym-backup-${new Date().toISOString().slice(0, 10)}.json`;
-  const file = new File([JSON.stringify(state, null, 2)], name, { type: "application/json" });
+  const name = `gym-backup-${todayISO()}.json`;
+  // Stamp the date into the file itself, so a restore can say how old it is.
+  const file = new File([JSON.stringify({ ...state, active: null, lastBackup: todayISO() }, null, 2)], name, { type: "application/json" });
   // iOS: the share sheet lets you save to Files or send it to yourself.
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: "Gym backup" }); } catch {}
-    return;
+    try {
+      await navigator.share({ files: [file], title: "Gym backup" });
+    } catch (err) {
+      if (err.name === "AbortError") return; // closed the share sheet without saving
+    }
+  } else {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(file);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
   }
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(file);
-  a.download = name;
-  a.click();
-  URL.revokeObjectURL(a.href);
+  state.lastBackup = todayISO();
+  save();
+  render();
+}
+
+// Nudge on the Today tab when there is training data and no backup in the last 7 days.
+function backupNudge() {
+  if (!state.history.length) return "";
+  const days = state.lastBackup ? (Date.now() - new Date(state.lastBackup + "T12:00:00")) / 86400000 : Infinity;
+  if (days < 7) return "";
+  return `<div class="card nudge">
+      <b>Back up your training</b>
+      <p class="muted small">${state.lastBackup ? `Last backup was ${Math.floor(days)} days ago.` : "You have no backup yet."} Your ${state.history.length === 1 ? "workout lives" : `${state.history.length} workouts live`} only on this phone.</p>
+      <button class="btn secondary" id="nudge-backup">Save backup now</button>
+    </div>`;
 }
 
 function importData(e) {
@@ -447,6 +470,8 @@ function importData(e) {
     try {
       const data = JSON.parse(txt);
       if (!data.profile) throw new Error("no profile");
+      const n = (data.history || []).length;
+      if (!confirm(`Restore this backup with ${n} ${n === 1 ? "workout" : "workouts"}${data.lastBackup ? ` from ${fmtDate(data.lastBackup)}` : ""}? It replaces what is on this phone now.`)) return;
       state = { ...emptyState(), ...data };
       save();
       tab = "today";

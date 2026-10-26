@@ -192,3 +192,7 @@ select {
 .lift .name { font-weight: 600; }
 .spark { width: 100px; height: 30px; flex: none; display: block; margin-top: 8px; }
 .lift .spark { margin-top: 0; }
+
+.nudge { border-color: #5a4a1a; }
+.nudge b { color: var(--warn); }
+.nudge .btn { margin-top: 10px; }
