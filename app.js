@@ -346,8 +346,9 @@ function renderToday() {
   const t = todayIndex();
   title.textContent = state.profile.name ? `Hi, ${state.profile.name}` : "Today";
   const back = selectedDay !== t ? `<button class="btn secondary" id="to-today">Back to today</button>` : "";
-  app.innerHTML = `${backupNudge()}<div class="card">${weekStrip(p, selectedDay)}${back}</div>${dayPlan(p, selectedDay, false)}${statsCard()}`;
+  app.innerHTML = `${backupNudge()}${questCard(game(), false)}<div class="card">${weekStrip(p, selectedDay)}${back}</div>${dayPlan(p, selectedDay, false)}${statsCard()}`;
   bindDayTaps();
+  document.getElementById("quest-card").onclick = () => { tab = "progress"; render(); };
   const nb = document.getElementById("nudge-backup");
   if (nb) nb.onclick = exportData;
   const b = document.getElementById("to-today");

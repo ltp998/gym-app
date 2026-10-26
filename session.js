@@ -43,8 +43,13 @@ function startWorkout(workoutId) {
   render();
 }
 
+function game() {
+  return gamify(state.history, state.weights, state.profile, todayISO());
+}
+
 function finishWorkout() {
   const a = state.active;
+  const before = game();
   const entry = {
     date: todayISO(),
     workoutId: a.workoutId,
@@ -68,16 +73,39 @@ function finishWorkout() {
   state.restEnd = null;
   save();
   render();
-  if (hasData) showSummary(entry);
+  if (hasData) showSummary(entry, before, game());
 }
 
-function showSummary(entry) {
+// XP gained, level-ups, new badges and records between two game states.
+function rewardsHtml(before, after, date) {
+  const gained = after.xp - before.xp;
+  const newBadges = after.badges.filter((b, i) => b.earned && !before.badges[i].earned);
+  const newPrs = after.prList.slice(before.prList.length).filter(p => !date || p.date === date);
+  const questsDone = after.quests.filter((q, i) => q.done && !before.quests[i].done);
+  return `
+    <div class="reward">
+      <b class="xp-gain">+${gained} XP</b>
+      ${after.level > before.level ? `<div class="levelup">Level up! You are now level ${after.level} · ${esc(after.title)}</div>` : ""}
+      ${xpBar(after)}
+      ${newPrs.map(p => `<div class="reward-line">📈 New record: ${esc(p.name)} ${p.kg} kg</div>`).join("")}
+      ${questsDone.map(q => `<div class="reward-line">🎯 Quest done: ${esc(q.text)}</div>`).join("")}
+      ${newBadges.map(b => `<div class="reward-line">${b.icon} Badge unlocked: ${esc(b.name)}</div>`).join("")}
+    </div>`;
+}
+
+function xpBar(g) {
+  return `<div class="xpbar"><i style="width:${Math.round((g.into / g.span) * 100)}%"></i></div>
+    <div class="muted small">Level ${g.level} · ${esc(g.title)} · ${g.into} / ${g.span} XP to level ${g.level + 1}</div>`;
+}
+
+function showSummary(entry, before, after) {
   const sets = entry.exercises.reduce((n, e) => n + e.sets.length, 0);
   const wrap = document.createElement("div");
   wrap.className = "sheet-backdrop";
   wrap.innerHTML = `<div class="sheet">
     <div class="eyebrow">Workout saved</div>
     <h2>${esc(entry.name)} done</h2>
+    ${rewardsHtml(before, after, entry.date)}
     <div class="stats">
       <div class="stat"><b>${sets}</b><span>sets</span></div>
       <div class="stat"><b>${entry.minutes} min</b><span>time</span></div>
@@ -288,7 +316,9 @@ function renderProgress() {
   }
   const weights = state.weights;
 
+  const g = game();
   app.innerHTML = `
+    ${questCard(g, true)}
     <div class="card">
       <div class="stats">
         <div class="stat"><b>${thisWeek} / ${state.profile.trainDays.length}</b><span>workouts this week</span></div>
@@ -306,6 +336,13 @@ function renderProgress() {
       </div>
       ${weights.length ? `<p class="muted small">Latest ${weights[weights.length - 1].kg} kg on ${fmtDate(weights[weights.length - 1].date)}${weights.length > 1 ? ` · ${(weights[weights.length - 1].kg - weights[0].kg >= 0 ? "+" : "")}${(weights[weights.length - 1].kg - weights[0].kg).toFixed(1)} kg since ${fmtDate(weights[0].date)}` : ""}</p>` : `<p class="muted small">Weigh yourself in the morning, once a week, for a fair comparison.</p>`}
       ${sparkline(weights.map(w => w.kg))}
+    </div>
+    <div class="card">
+      <h3>Badges · ${g.badges.filter(b => b.earned).length} / ${g.badges.length}</h3>
+      <div class="badges">
+        ${g.badges.map(b => `<div class="badge ${b.earned ? "earned" : ""}"><span>${b.earned ? b.icon : "🔒"}</span>${esc(b.name)}</div>`).join("")}
+      </div>
+      ${g.prList.length ? `<h3 class="sub">Latest records</h3>` + g.prList.slice(-5).reverse().map(p => `<div class="muted small">📈 ${fmtDate(p.date)} · ${esc(p.name)} ${p.kg} kg</div>`).join("") : ""}
     </div>
     <div class="card">
       <h3>Lifts</h3>
@@ -425,11 +462,13 @@ function openOutdoor() {
         exercises: [],
         outdoor: { type: o.type, min, km: Number(wrap.querySelector("#o-km").value) || 0, elev: Number(wrap.querySelector("#o-elev").value) || 0 },
       };
+      const before = game();
       state.history.push(entry);
       state.history.sort((x, y) => x.date.localeCompare(y.date)); // keep history in date order
       save();
       wrap.remove();
       render();
+      openSheet(`<div class="eyebrow">Saved</div><h2>${esc(entry.name)} · ${entry.outdoor.km} km</h2>${rewardsHtml(before, game(), entry.date)}<button class="btn" data-close>Nice</button>`, () => {});
     };
   });
 }
@@ -505,4 +544,24 @@ function openEntryEditor(idx) {
       render();
     };
   });
+}
+
+// Level, streak and this week's quests. `full` adds the XP rules (Progress tab).
+function questCard(g, full) {
+  return `<div class="card quest-card" ${full ? "" : `id="quest-card"`}>
+      <div class="ex-head">
+        <h3>Level ${g.level} · ${esc(g.title)}</h3>
+        <span class="streak">${g.streak ? `🔥 ${g.streak} ${g.streak === 1 ? "week" : "weeks"}` : ""}</span>
+      </div>
+      <div class="xpbar"><i style="width:${Math.round((g.into / g.span) * 100)}%"></i></div>
+      <div class="muted small">${g.into} / ${g.span} XP to level ${g.level + 1}</div>
+      <h3 class="sub">This week's quests</h3>
+      ${g.quests.map(q => `
+        <div class="quest ${q.done ? "done" : ""}">
+          <span class="q-check">${q.done ? "✓" : ""}</span>
+          <span class="q-text">${esc(q.text)}</span>
+          <span class="q-val">${q.value}${q.unit ? " " + q.unit : ""} / ${q.goal}${q.unit ? " " + q.unit : ""}</span>
+        </div>`).join("")}
+      ${full ? `<p class="muted small">XP: workout 100 + 5 per set · cardio and outdoor 1 per minute · 1 per 10 m climbed · record 50 · quest 150. The streak counts weeks where you hit all your gym days.</p>` : ""}
+    </div>`;
 }

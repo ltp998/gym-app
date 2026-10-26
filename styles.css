@@ -202,3 +202,23 @@ button.lift.entry { width: 100%; background: none; border: 0; border-top: 1px so
 .edit-ex { margin-top: 14px; }
 .check.del { color: #f87171; font-size: 16px; }
 .sheet input[type="date"] { min-height: 48px; }
+
+.quest-card h3 { margin: 0; }
+.sub { margin: 16px 0 6px; font-size: 15px; }
+.streak { font-weight: 700; color: var(--warn); white-space: nowrap; }
+.xpbar { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; margin: 10px 0 6px; }
+.xpbar i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+.quest { display: grid; grid-template-columns: 24px 1fr auto; gap: 8px; align-items: center; padding: 7px 0; font-size: 15px; }
+.q-check { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--border); display: grid; place-items: center; font-size: 13px; font-weight: 700; }
+.quest.done .q-check { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.quest.done .q-text { color: var(--muted); text-decoration: line-through; }
+.q-val { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.badges { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; }
+.badge { text-align: center; font-size: 11px; line-height: 1.25; color: var(--muted); background: var(--surface-2); border-radius: 10px; padding: 8px 4px; opacity: 0.55; }
+.badge span { display: block; font-size: 24px; margin-bottom: 4px; }
+.badge.earned { opacity: 1; color: var(--text); }
+.reward { margin: 8px 0 4px; }
+.xp-gain { display: block; font-size: 28px; color: var(--accent); }
+.levelup { margin: 6px 0; padding: 10px; border-radius: 10px; background: #173322; color: var(--accent); font-weight: 700; }
+.reward-line { margin-top: 6px; font-size: 15px; }
+.lift > b { white-space: nowrap; }
