@@ -2,6 +2,7 @@
 // Uses the globals from app.js (state, save, render, app, title, esc, program).
 
 let restTicker = null;
+const CARDIO_TYPES = ["Treadmill", "Bike", "Stairs", "Rowing", "Elliptical", "Other"];
 let audioCtx = null;
 
 function todayISO() {
@@ -55,7 +56,10 @@ function finishWorkout() {
       sets: ex.log.filter(s => s.done).map(s => ({ kg: Number(s.kg) || 0, reps: Number(s.reps) || 0 })),
     })).filter(ex => ex.sets.length),
   };
-  if (!entry.exercises.length) {
+  const c = a.cardio || {};
+  if (Number(c.min) > 0) entry.cardio = { type: c.type || "Cardio", min: Number(c.min), km: Number(c.km) || 0 };
+  const hasData = entry.exercises.length || entry.cardio;
+  if (!hasData) {
     if (!confirm("No sets are ticked off. End the workout without saving?")) return;
   } else {
     state.history.push(entry);
@@ -64,7 +68,7 @@ function finishWorkout() {
   state.restEnd = null;
   save();
   render();
-  if (entry.exercises.length) showSummary(entry);
+  if (hasData) showSummary(entry);
 }
 
 function showSummary(entry) {
@@ -78,6 +82,7 @@ function showSummary(entry) {
       <div class="stat"><b>${sets}</b><span>sets</span></div>
       <div class="stat"><b>${entry.minutes} min</b><span>time</span></div>
       <div class="stat"><b>${sessionVolume(entry).toLocaleString("en")} kg</b><span>total lifted</span></div>
+      ${entry.cardio ? `<div class="stat"><b>${entry.cardio.min} min</b><span>${esc(entry.cardio.type.toLowerCase())}${entry.cardio.km ? ` · ${entry.cardio.km} km` : ""}</span></div>` : ""}
       <div class="stat"><b>${state.history.length}</b><span>workouts so far</span></div>
     </div>
     <button class="btn" data-close>Nice</button>
@@ -113,6 +118,15 @@ function renderSession() {
           </div>`).join("")}
         <button class="link" data-add="${i}">+ Add set</button>
       </div>`).join("")}
+    <div class="card">
+      <h3>Cardio</h3>
+      <p class="muted small">Did any cardio before or after lifting? Leave empty if not.</p>
+      ${chips("cardioType", CARDIO_TYPES.map(t => [t, t]), (a.cardio || {}).type || "")}
+      <div class="row">
+        <div><label for="c-min">Minutes</label><input id="c-min" type="number" inputmode="numeric" value="${esc((a.cardio || {}).min || "")}" placeholder="0"></div>
+        <div><label for="c-km">Distance (km, optional)</label><input id="c-km" type="number" inputmode="decimal" step="0.1" value="${esc((a.cardio || {}).km || "")}" placeholder="–"></div>
+      </div>
+    </div>
     <button class="btn" id="finish">Finish workout</button>
     <button class="btn danger" id="discard">Cancel workout</button>
     <div style="height:70px"></div>`;
@@ -155,6 +169,16 @@ function renderSession() {
     window.scrollTo(0, y);
   });
 
+  const cardio = () => (a.cardio = a.cardio || {});
+  app.querySelector('[data-chips="cardioType"]').addEventListener("click", e => {
+    const b = e.target.closest(".chip");
+    if (!b) return;
+    cardio().type = b.dataset.value;
+    app.querySelectorAll('[data-chips="cardioType"] .chip').forEach(c => c.setAttribute("aria-pressed", c === b));
+    save();
+  });
+  document.getElementById("c-min").oninput = e => { cardio().min = e.target.value; save(); };
+  document.getElementById("c-km").oninput = e => { cardio().km = e.target.value; save(); };
   document.getElementById("finish").onclick = finishWorkout;
   document.getElementById("discard").onclick = () => {
     if (!confirm("Cancel this workout? Nothing from it will be saved.")) return;
@@ -242,7 +266,9 @@ function renderProgress() {
   // Monday of this week, for the weekly count.
   const now = new Date();
   const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - todayIndex());
-  const thisWeek = h.filter(e => new Date(e.date + "T12:00:00") >= monday).length;
+  const weekEntries = h.filter(e => new Date(e.date + "T12:00:00") >= monday);
+  const thisWeek = weekEntries.filter(e => e.exercises.length).length;
+  const cardioWeek = weekEntries.reduce((m, e) => m + (e.cardio ? e.cardio.min : 0), 0);
 
   // Heaviest set per session for each exercise, oldest first.
   const byName = {};
@@ -261,7 +287,7 @@ function renderProgress() {
     <div class="card">
       <div class="stats">
         <div class="stat"><b>${thisWeek} / ${state.profile.trainDays.length}</b><span>workouts this week</span></div>
-        <div class="stat"><b>${h.length}</b><span>workouts in total</span></div>
+        <div class="stat"><b>${cardioWeek} min</b><span>cardio this week</span></div>
       </div>
     </div>
     <div class="card">
@@ -285,7 +311,7 @@ function renderProgress() {
       <h3>Recent workouts</h3>
       ${h.length ? h.slice(-10).reverse().map(e => `
         <div class="lift">
-          <div><div class="name">${esc(e.name)}</div><div class="muted small">${fmtDate(e.date)} · ${e.minutes} min · ${e.exercises.reduce((n, x) => n + x.sets.length, 0)} sets</div></div>
+          <div><div class="name">${esc(e.name)}</div><div class="muted small">${fmtDate(e.date)} · ${e.minutes} min · ${e.exercises.reduce((n, x) => n + x.sets.length, 0)} sets${e.cardio ? ` · ${e.cardio.min} min ${esc(e.cardio.type.toLowerCase())}` : ""}</div></div>
           <b>${sessionVolume(e).toLocaleString("en")} kg</b>
         </div>`).join("") : `<p class="muted small">No workouts yet.</p>`}
     </div>`;

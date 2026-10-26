@@ -51,6 +51,14 @@ function todayIndex() {
 
 function program() {
   const p = buildProgram(state.profile);
+  // Today's workout can be changed by hand; the change only lasts for that date.
+  const o = state.dayOverride;
+  if (o && o.date === todayISO()) {
+    const d = p.week[todayIndex()];
+    d.workoutId = o.workoutId;
+    d.hike = false;
+    d.changed = true;
+  }
   for (const w of p.workouts) {
     for (const ex of w.exercises) {
       if (state.swaps[ex.key]) ex.name = state.swaps[ex.key];
@@ -241,10 +249,12 @@ function dayPlan(p, d, withSwap) {
   // On the Today tab each workout gets a start button; the Program tab is for planning and swaps.
   const start = (id, label) => withSwap ? "" : `<button class="btn" data-start="${id}">${label}</button>`;
   const doneToday = d === t && state.history.some(e => e.date === todayISO());
+  const change = !withSwap && d === t ? `<button class="btn secondary" id="change-day">Change today's workout</button>` : "";
+  const changed = day.changed ? " · changed" : "";
 
   if (day.workoutId) {
-    return `<div class="eyebrow">${when}${doneToday ? " · done ✓" : ""}</div>` + workoutCard(byId[day.workoutId], withSwap) +
-      start(day.workoutId, doneToday ? "Start again" : "Start workout");
+    return `<div class="eyebrow">${when}${changed}${doneToday ? " · done ✓" : ""}</div>` + workoutCard(byId[day.workoutId], withSwap) +
+      start(day.workoutId, doneToday ? "Start again" : "Start workout") + change;
   }
 
   if (day.hike) {
@@ -259,7 +269,7 @@ function dayPlan(p, d, withSwap) {
         <p><b>Gym</b><br><span class="muted small">The optional session below. Go lighter if you are tired from the week.</span></p>
       </div>
       <div class="eyebrow">Optional gym${doneToday ? " · done ✓" : ""}</div>` + workoutCard(optional, withSwap) +
-      start(optional.id, "Start gym session");
+      start(optional.id, "Start gym session") + change;
   }
 
   let next = null;
@@ -272,7 +282,7 @@ function dayPlan(p, d, withSwap) {
       <h2>Rest day</h2>
       <p class="muted">Recovery is when you get stronger. A walk is a good idea.</p>
       <p class="muted small">Next workout: ${esc(byId[next.workoutId].name)} on ${DAY_NAMES_LONG[next.day]}.</p>
-    </div>`;
+    </div>${change}`;
 }
 
 function bindDayTaps() {
@@ -282,6 +292,33 @@ function bindDayTaps() {
   });
   app.querySelectorAll(".swap").forEach(b => b.onclick = () => openSwap(b.dataset.key, b.dataset.pattern));
   app.querySelectorAll("[data-start]").forEach(b => b.onclick = () => startWorkout(b.dataset.start));
+  const ch = document.getElementById("change-day");
+  if (ch) ch.onclick = openChangeDay;
+}
+
+function openChangeDay() {
+  const p = program();
+  const current = p.week[todayIndex()].workoutId;
+  const wrap = document.createElement("div");
+  wrap.className = "sheet-backdrop";
+  wrap.innerHTML = `<div class="sheet">
+    <h3>Today's workout</h3>
+    <p class="muted small">Only today changes. The rest of your week stays as planned.</p>
+    ${p.workouts.map(w => `<button class="option" data-w="${w.id}">${esc(w.name)}${w.id === current ? " ✓" : ""}</button>`).join("")}
+    <button class="option" data-w="">Rest day${current === null ? " ✓" : ""}</button>
+    ${state.dayOverride && state.dayOverride.date === todayISO() ? `<button class="option" data-reset>Back to the plan</button>` : ""}
+    <button class="btn secondary" data-close>Cancel</button>
+  </div>`;
+  wrap.addEventListener("click", e => {
+    if (e.target === wrap || e.target.hasAttribute("data-close")) return wrap.remove();
+    const o = e.target.closest(".option");
+    if (!o) return;
+    state.dayOverride = o.hasAttribute("data-reset") ? null : { date: todayISO(), workoutId: o.dataset.w || null };
+    save();
+    wrap.remove();
+    render();
+  });
+  document.body.appendChild(wrap);
 }
 
 function statsCard() {
