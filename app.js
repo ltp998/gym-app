@@ -366,6 +366,7 @@ function renderProgram() {
       <p class="muted small">Tap a day to see its plan.</p>
       ${weekStrip(p, selectedDay)}
     </div>
+    ${refreshCard(p)}
     ${dayPlan(p, selectedDay, true)}
     <div class="card">
       <h3>Tips</h3>
@@ -373,6 +374,11 @@ function renderProgram() {
     </div>
     ${statsCard()}`;
   bindDayTaps();
+  app.querySelectorAll("[data-refresh]").forEach(b => b.onclick = () => {
+    state.swaps[b.dataset.refresh] = b.dataset.alt;
+    save();
+    render();
+  });
 }
 
 function openSwap(key, pattern) {
@@ -414,6 +420,7 @@ function renderProfile() {
     <div class="card">
       <h3>Backup</h3>
       <p class="muted small">Your data lives only on this phone. If you delete the app from the home screen or clear Safari data, it is gone. Save a backup to Files or iCloud Drive once a week.</p>
+      <p class="muted small">Storage: <b>${storageProtected ? "protected from automatic clean-up" : "not protected yet, keep backups"}</b></p>
       <p class="muted small">Last backup: <b>${state.lastBackup ? fmtDate(state.lastBackup) : "never"}</b> · ${state.history.length} workouts, ${state.weights.length} weigh-ins</p>
       <button class="btn secondary" id="export">Save backup</button>
       <button class="btn secondary" id="import">Restore backup</button>
@@ -494,6 +501,15 @@ tabbar.addEventListener("click", e => {
   selectedDay = todayIndex();
   render();
 });
+
+// Ask the browser not to clear this app's data when the phone runs low on space.
+let storageProtected = false;
+if (navigator.storage && navigator.storage.persist) {
+  navigator.storage.persisted()
+    .then(done => done || navigator.storage.persist())
+    .then(ok => { storageProtected = ok; })
+    .catch(() => {});
+}
 
 if ("serviceWorker" in navigator && location.protocol !== "file:") {
   navigator.serviceWorker.register("sw.js");

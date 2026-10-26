@@ -10,6 +10,11 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function isoOf(ts) {
+  const d = new Date(ts);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 function fmtDate(iso) {
   const d = new Date(iso + "T12:00:00");
   return `${DAY_NAMES[(d.getDay() + 6) % 7]} ${d.getDate()}. ${d.getMonth() + 1}.`;
@@ -22,14 +27,18 @@ function fmtClock(sec) {
 
 // ---------- Start / finish ----------
 
-function startWorkout(workoutId) {
+// `date` is set when adding a past workout after the fact.
+function startWorkout(workoutId, date) {
   const w = program().workouts.find(x => x.id === workoutId);
+  const history = date ? state.history.filter(e => e.date < date) : state.history;
   state.active = {
     workoutId: w.id,
     name: w.name,
     started: Date.now(),
+    date: date || null,
     exercises: w.exercises.map(ex => {
-      const sug = suggestion(ex, state.history);
+      const sug = suggestion(ex, history);
+      if (!date && needsRefresh(performances(history, ex.name))) sug.text += " No progress in 6 sessions: consider a swap in the Program tab.";
       return {
         ...ex,
         tip: sug.text,
@@ -51,10 +60,11 @@ function finishWorkout() {
   const a = state.active;
   const before = game();
   const entry = {
-    date: todayISO(),
+    // The day it started, so a workout finished after midnight keeps its real date.
+    date: a.date || isoOf(a.started),
     workoutId: a.workoutId,
     name: a.name,
-    minutes: Math.max(1, Math.round((Date.now() - a.started) / 60000)),
+    minutes: a.date ? state.profile.sessionMin : Math.max(1, Math.round((Date.now() - a.started) / 60000)),
     exercises: a.exercises.map(ex => ({
       name: ex.name,
       pattern: ex.pattern,
@@ -68,6 +78,7 @@ function finishWorkout() {
     if (!confirm("No sets are ticked off. End the workout without saving?")) return;
   } else {
     state.history.push(entry);
+    state.history.sort((x, y) => x.date.localeCompare(y.date));
   }
   state.active = null;
   state.restEnd = null;
@@ -127,7 +138,7 @@ function renderSession() {
   const a = state.active;
   title.textContent = a.name;
   app.innerHTML = `
-    <div class="eyebrow">In progress · <span id="elapsed">${fmtClock((Date.now() - a.started) / 1000)}</span></div>
+    <div class="eyebrow">${a.date ? `Adding a past workout · ${fmtDate(a.date)}` : `In progress · <span id="elapsed">${fmtClock((Date.now() - a.started) / 1000)}</span>`}</div>
     ${a.exercises.map((ex, i) => `
       <div class="card">
         <div class="ex-head">
@@ -181,7 +192,7 @@ function renderSession() {
     const s = ex.log[b.dataset.set];
     s.done = !s.done;
     if (s.done && s.reps === "") s.reps = String(topReps(ex.reps));
-    if (s.done) startRest(ex.rest);
+    if (s.done && !a.date) startRest(ex.rest);
     save();
     const y = window.scrollY;
     render();
@@ -245,7 +256,7 @@ function beep() {
 
 function updateRestBar() {
   let bar = document.getElementById("restbar");
-  const show = state.active && tab === "today";
+  const show = state.active && !state.active.date && tab === "today";
   if (!show) {
     if (bar) bar.remove();
     return;
@@ -327,6 +338,7 @@ function renderProgress() {
         <div class="stat"><b>${elevWeek} m</b><span>climbed this week</span></div>
       </div>
       <button class="btn secondary" id="log-outdoor">+ Log hike or outdoor cardio</button>
+      <button class="btn secondary" id="add-past">+ Add a past gym workout</button>
     </div>
     <div class="card">
       <h3>Body weight</h3>
@@ -362,6 +374,7 @@ function renderProgress() {
     </div>`;
 
   document.getElementById("log-outdoor").onclick = () => openOutdoor();
+  document.getElementById("add-past").onclick = openAddPast;
   app.querySelectorAll("[data-entry]").forEach(b => b.onclick = () => openEntryEditor(Number(b.dataset.entry)));
 
   document.getElementById("bw-save").onclick = () => {
@@ -496,6 +509,7 @@ function openEntryEditor(idx) {
             <input type="number" inputmode="numeric" value="${num(s.reps)}" data-ex="${i}" data-set="${j}" data-k="reps" placeholder="reps">
             <button class="check del" data-del="${i}-${j}" aria-label="Remove set">✕</button>
           </div>`).join("")}
+        <button class="link" data-addset="${i}">+ Add set</button>
       </div>`).join("") + (e.cardio ? `
       <div class="row">
         <div><label>${esc(e.cardio.type)} (min)</label><input data-c="min" type="number" inputmode="numeric" value="${num(e.cardio.min)}"></div>
@@ -511,6 +525,18 @@ function openEntryEditor(idx) {
     <button class="btn danger" id="e-delete">Delete this entry</button>
     <button class="btn secondary" data-close>Cancel</button>`, wrap => {
     const removed = new Set();
+    const counts = e.exercises.map(ex => ex.sets.length);
+    wrap.querySelectorAll("[data-addset]").forEach(b => b.onclick = () => {
+      const i = Number(b.dataset.addset), j = counts[i]++;
+      const prev = e.exercises[i].sets[e.exercises[i].sets.length - 1] || {};
+      b.insertAdjacentHTML("beforebegin", `
+        <div class="set-row">
+          <span class="set-n">${j + 1}</span>
+          <input type="number" inputmode="decimal" step="0.5" value="${prev.kg ?? ""}" data-ex="${i}" data-set="${j}" data-k="kg" placeholder="kg">
+          <input type="number" inputmode="numeric" data-ex="${i}" data-set="${j}" data-k="reps" placeholder="reps">
+          <span></span>
+        </div>`);
+    });
     wrap.querySelectorAll("[data-del]").forEach(b => b.onclick = () => {
       removed.add(b.dataset.del);
       b.closest(".set-row").remove();
@@ -521,8 +547,12 @@ function openEntryEditor(idx) {
         wrap.querySelectorAll("[data-f]").forEach(inp => (e.outdoor[inp.dataset.f] = Number(inp.value) || 0));
         e.minutes = e.outdoor.min;
       } else {
-        wrap.querySelectorAll("[data-k]").forEach(inp => (e.exercises[inp.dataset.ex].sets[inp.dataset.set][inp.dataset.k] = Number(inp.value) || 0));
-        e.exercises.forEach((ex, i) => (ex.sets = ex.sets.filter((_, j) => !removed.has(`${i}-${j}`))));
+        wrap.querySelectorAll("[data-k]").forEach(inp => {
+          const sets = e.exercises[inp.dataset.ex].sets;
+          sets[inp.dataset.set] = sets[inp.dataset.set] || { kg: 0, reps: 0 }; // added rows
+          sets[inp.dataset.set][inp.dataset.k] = Number(inp.value) || 0;
+        });
+        e.exercises.forEach((ex, i) => (ex.sets = ex.sets.filter((s, j) => !removed.has(`${i}-${j}`) && (s.reps || s.kg))));
         e.exercises = e.exercises.filter(ex => ex.sets.length);
         if (e.cardio) {
           wrap.querySelectorAll("[data-c]").forEach(inp => (e.cardio[inp.dataset.c] = Number(inp.value) || 0));
@@ -563,5 +593,52 @@ function questCard(g, full) {
           <span class="q-val">${q.value}${q.unit ? " " + q.unit : ""} / ${q.goal}${q.unit ? " " + q.unit : ""}</span>
         </div>`).join("")}
       ${full ? `<p class="muted small">XP: workout 100 + 5 per set · cardio and outdoor 1 per minute · 1 per 10 m climbed · record 50 · quest 150. The streak counts weeks where you hit all your gym days.</p>` : ""}
+    </div>`;
+}
+
+// Pick a workout and a date, then fill it in on the normal session screen.
+function openAddPast() {
+  if (state.active) return alert("Finish or cancel the workout in progress first.");
+  const p = program();
+  const pick = { w: p.workouts[0].id };
+  const yesterday = isoOf(Date.now() - 86400000);
+  openSheet(`
+    <h3>Add a past gym workout</h3>
+    <p class="muted small">For a workout you forgot to start in the app.</p>
+    <label>Workout</label>
+    ${chips("pastW", p.workouts.map(w => [w.id, w.name]), pick.w)}
+    <label for="p-date">Date</label>
+    <input id="p-date" type="date" value="${yesterday}" max="${todayISO()}">
+    <button class="btn" id="p-go">Fill in sets</button>
+    <button class="btn secondary" data-close>Cancel</button>`, wrap => {
+    bindChipGroup(wrap, "pastW", v => (pick.w = v));
+    wrap.querySelector("#p-go").onclick = () => {
+      const date = wrap.querySelector("#p-date").value || yesterday;
+      wrap.remove();
+      tab = "today";
+      startWorkout(pick.w, date);
+    };
+  });
+}
+
+// Program tab: exercises that stopped progressing, with a suggested replacement.
+function refreshCard(p) {
+  const rows = [];
+  for (const w of p.workouts) {
+    for (const ex of w.exercises) {
+      if (ex.pattern === "core" || !needsRefresh(performances(state.history, ex.name))) continue;
+      const opts = PATTERNS[ex.pattern].options;
+      const alt = opts[(opts.indexOf(ex.name) + 1) % opts.length];
+      rows.push(`<div class="lift">
+          <div><div class="name">${esc(ex.name)}</div><div class="muted small">${esc(w.name)} · no progress in 6 sessions. Try ${esc(alt)}.</div></div>
+          <button class="btn secondary small-btn" data-refresh="${ex.key}" data-alt="${esc(alt)}">Swap</button>
+        </div>`);
+    }
+  }
+  if (!rows.length) return "";
+  return `<div class="card nudge">
+      <b>Time to switch things up</b>
+      <p class="muted small">A new variation of the same movement often gets progress going again.</p>
+      ${rows.join("")}
     </div>`;
 }

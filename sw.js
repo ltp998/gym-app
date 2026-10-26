@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION whenever app files change so phones pick up the update.
-const VERSION = "gym-v9";
+const VERSION = "gym-v10";
 const FILES = ["./", "index.html", "styles.css", "program.js", "quests.js", "session.js", "app.js", "manifest.webmanifest", "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png"];
 
 self.addEventListener("install", e => {

@@ -194,11 +194,53 @@ function lastPerformance(history, name) {
   return null;
 }
 
+// Every logged session of one exercise, oldest first: top kg, total reps and best estimated 1RM.
+function performances(history, name) {
+  const out = [];
+  for (const e of history) {
+    const ex = e.exercises.find(x => x.name === name && x.sets.length);
+    if (!ex) continue;
+    out.push({
+      date: e.date,
+      kg: Math.max(...ex.sets.map(s => s.kg || 0)),
+      reps: ex.sets.reduce((n, s) => n + (s.reps || 0), 0),
+      // Epley estimate, so a heavier set and a set with more reps can be compared.
+      e1rm: Math.max(...ex.sets.map(s => (s.kg || 0) * (1 + (s.reps || 0) / 30))),
+    });
+  }
+  return out;
+}
+
+// Stalled: the last 3 sessions used the same top weight and total reps did not go up.
+function isStalled(perf) {
+  if (perf.length < 3) return false;
+  const [a, b, c] = perf.slice(-3);
+  return a.kg > 0 && a.kg === b.kg && b.kg === c.kg && c.reps <= a.reps;
+}
+
+// Needs a new exercise: 6 sessions in a row without beating the best estimated 1RM from before them.
+function needsRefresh(perf) {
+  if (perf.length < 7) return false;
+  const before = Math.max(...perf.slice(0, -6).map(p => p.e1rm));
+  return before > 0 && perf.slice(-6).every(p => p.e1rm <= before);
+}
+
+function roundTo(kg, step) {
+  return Math.round(kg / step) * step;
+}
+
 // Double progression: when every set reached the top of the range, add weight; otherwise beat the reps.
+// Three sessions stuck at the same weight: drop about 10 % and build back up (deload).
 function suggestion(ex, history) {
   const last = lastPerformance(history, ex.name);
   if (ex.pattern === "core") return { kg: null, last, text: `Hold ${ex.reps}.` };
   if (!last) return { kg: null, last, text: "First time: pick a weight you can lift for the top of the range with 2–3 reps left." };
+  const perf = performances(history, ex.name);
+  if (isStalled(perf)) {
+    const from = perf[perf.length - 1].kg;
+    const to = Math.max(increment(ex.pattern), roundTo(from * 0.9, 2.5));
+    return { kg: to, last, deload: true, text: `Stuck at ${from} kg for 3 sessions. Drop to ${to} kg (about −10 %) and build back up.` };
+  }
   const kg = Math.max(...last.sets.map(s => s.kg || 0));
   const top = topReps(ex.reps);
   const hitTop = last.sets.length >= ex.sets && last.sets.every(s => s.reps >= top);
@@ -213,4 +255,4 @@ function sessionVolume(entry) {
   return Math.round(entry.exercises.reduce((sum, e) => sum + e.sets.reduce((s2, st) => s2 + (st.kg || 0) * (st.reps || 0), 0), 0));
 }
 
-if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, SPLITS, buildProgram, bodyStats, DAY_NAMES, topReps, suggestion, lastPerformance, sessionVolume };
+if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, SPLITS, buildProgram, bodyStats, DAY_NAMES, topReps, suggestion, lastPerformance, sessionVolume, performances, isStalled, needsRefresh };
