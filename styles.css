@@ -196,3 +196,9 @@ select {
 .nudge { border-color: #5a4a1a; }
 .nudge b { color: var(--warn); }
 .nudge .btn { margin-top: 10px; }
+
+.swap-now { padding: 4px 0 0; font-size: 14px; }
+button.lift.entry { width: 100%; background: none; border: 0; border-top: 1px solid var(--border); color: var(--text); font: inherit; text-align: left; }
+.edit-ex { margin-top: 14px; }
+.check.del { color: #f87171; font-size: 16px; }
+.sheet input[type="date"] { min-height: 48px; }

@@ -248,7 +248,7 @@ function dayPlan(p, d, withSwap) {
 
   // On the Today tab each workout gets a start button; the Program tab is for planning and swaps.
   const start = (id, label) => withSwap ? "" : `<button class="btn" data-start="${id}">${label}</button>`;
-  const doneToday = d === t && state.history.some(e => e.date === todayISO());
+  const doneToday = d === t && state.history.some(e => e.date === todayISO() && e.exercises.length);
   const change = !withSwap && d === t ? `<button class="btn secondary" id="change-day">Change today's workout</button>` : "";
   const changed = day.changed ? " · changed" : "";
 
@@ -267,6 +267,7 @@ function dayPlan(p, d, withSwap) {
         <p><b>Hike</b><br><span class="muted small">Bring water and eat some protein afterwards.</span></p>
         <p><b>Outdoor cardio</b><br><span class="muted small">30–60 min of easy running, cycling or brisk walking. You should still be able to talk.</span></p>
         <p><b>Gym</b><br><span class="muted small">The optional session below. Go lighter if you are tired from the week.</span></p>
+        ${withSwap ? "" : `<button class="btn secondary" id="flex-outdoor">Log hike or outdoor cardio</button>`}
       </div>
       <div class="eyebrow">Optional gym${doneToday ? " · done ✓" : ""}</div>` + workoutCard(optional, withSwap) +
       start(optional.id, "Start gym session") + change;
@@ -292,6 +293,8 @@ function bindDayTaps() {
   });
   app.querySelectorAll(".swap").forEach(b => b.onclick = () => openSwap(b.dataset.key, b.dataset.pattern));
   app.querySelectorAll("[data-start]").forEach(b => b.onclick = () => startWorkout(b.dataset.start));
+  const fo = document.getElementById("flex-outdoor");
+  if (fo) fo.onclick = () => openOutdoor();
   const ch = document.getElementById("change-day");
   if (ch) ch.onclick = openChangeDay;
 }
@@ -299,13 +302,14 @@ function bindDayTaps() {
 function openChangeDay() {
   const p = program();
   const current = p.week[todayIndex()].workoutId;
+  const flex = p.week[todayIndex()].hike;
   const wrap = document.createElement("div");
   wrap.className = "sheet-backdrop";
   wrap.innerHTML = `<div class="sheet">
     <h3>Today's workout</h3>
     <p class="muted small">Only today changes. The rest of your week stays as planned.</p>
     ${p.workouts.map(w => `<button class="option" data-w="${w.id}">${esc(w.name)}${w.id === current ? " ✓" : ""}</button>`).join("")}
-    <button class="option" data-w="">Rest day${current === null ? " ✓" : ""}</button>
+    <button class="option" data-w="">Rest day${current === null && !flex ? " ✓" : ""}</button>
     ${state.dayOverride && state.dayOverride.date === todayISO() ? `<button class="option" data-reset>Back to the plan</button>` : ""}
     <button class="btn secondary" data-close>Cancel</button>
   </div>`;
