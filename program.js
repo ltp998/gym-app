@@ -68,7 +68,7 @@ const TEMPLATES = {
     { name: "Push", focus: "upper", slots: ["hpush", "vpush", { p: "hpush", alt: "Incline dumbbell press" }, "lateral", "triceps", "chestfly", { p: "triceps", alt: "Overhead cable extension" }] },
     { name: "Pull", focus: "upper", slots: ["vpull", "hpull", "facepull", "biceps", { p: "hpull", alt: "One-arm dumbbell row" }, { p: "biceps", alt: "Hammer curl" }, "core"] },
     { name: "Legs", focus: "lower", slots: ["squat", "hinge", "lunge", "legcurl", "legext", "calf", "core"] },
-    { name: "Full body", focus: "full", slots: [{ p: "squat", alt: "Leg press" }, "hpush", { p: "vpull", alt: "Close-grip lat pulldown" }, { p: "hinge", alt: "Hip thrust" }, "lateral", "core", "calf"] },
+    { name: "Full body", focus: "full", slots: [{ p: "squat", alt: "Leg press" }, "hpush", { p: "vpull", alt: "Close-grip lat pulldown" }, { p: "legcurl", alt: "Lying leg curl" }, "lateral", "core", "calf"] },
   ],
 };
 
@@ -94,6 +94,30 @@ function slotPattern(slot) {
   return typeof slot === "object" ? slot.p : slot;
 }
 
+// Core exercises held for time; the other core options are done for reps.
+const TIMED = ["Plank"];
+
+// Assisted machines and variations: the logged kg is help, so less kg is harder.
+function isAssisted(name) {
+  return /assisted/i.test(name);
+}
+
+function isTimed(ex) {
+  return /s$/.test(String(ex.reps));
+}
+
+// Reps depend on the exercise picked for a core slot, so call this after every name change.
+function applyName(ex) {
+  if (ex.pattern === "core") ex.reps = TIMED.includes(ex.name) ? "30–45 s" : "10–15";
+  return ex;
+}
+
+// Accepts "22,5" as well as "22.5": the iPhone keypad shows a comma in many regions.
+function toNum(v) {
+  const n = Number(String(v ?? "").trim().replace(",", "."));
+  return isFinite(n) ? n : 0;
+}
+
 function dose(pattern, profile) {
   const isMain = PATTERNS[pattern].main;
   const d = DOSES[profile.goal][isMain ? "main" : "acc"];
@@ -117,7 +141,7 @@ function buildProgram(profile) {
     focus: t.focus,
     exercises: t.slots.slice(0, limit).map((slot, j) => {
       const pattern = slotPattern(slot);
-      return { key: `w${i}-${j}`, pattern, name: exerciseName(slot, profile.level), ...dose(pattern, profile) };
+      return applyName({ key: `w${i}-${j}`, pattern, name: exerciseName(slot, profile.level), ...dose(pattern, profile) });
     }),
   }));
 
@@ -194,18 +218,38 @@ function lastPerformance(history, name) {
   return null;
 }
 
-// Every logged session of one exercise, oldest first: top kg, total reps and best estimated 1RM.
+// Best set of a session: heaviest, then most reps. For assisted exercises: least help, then most reps.
+function bestSet(name, sets) {
+  const sign = isAssisted(name) ? -1 : 1;
+  return sets.reduce((b, s) => {
+    if (!b) return s;
+    const k = sign * (s.kg || 0), bk = sign * (b.kg || 0);
+    return k > bk || (k === bk && (s.reps || 0) > (b.reps || 0)) ? s : b;
+  }, null);
+}
+
+// One number to compare sessions of the same exercise: estimated 1RM (Epley) for weighted lifts,
+// reps for bodyweight work, and for assisted work a score that rises with less help and more reps.
+function setScore(name, s) {
+  const kg = s.kg || 0, reps = s.reps || 0;
+  if (isAssisted(name)) return Math.max(0, 100 - kg) * (1 + reps / 30);
+  return kg > 0 ? kg * (1 + reps / 30) : reps;
+}
+
+// Every logged session of one exercise, oldest first: top kg, total reps and best score.
 function performances(history, name) {
   const out = [];
   for (const e of history) {
     const ex = e.exercises.find(x => x.name === name && x.sets.length);
     if (!ex) continue;
+    const top = bestSet(name, ex.sets);
     out.push({
       date: e.date,
-      kg: Math.max(...ex.sets.map(s => s.kg || 0)),
+      kg: top.kg || 0,
+      topReps: top.reps || 0,
       reps: ex.sets.reduce((n, s) => n + (s.reps || 0), 0),
-      // Epley estimate, so a heavier set and a set with more reps can be compared.
-      e1rm: Math.max(...ex.sets.map(s => (s.kg || 0) * (1 + (s.reps || 0) / 30))),
+      e1rm: Math.max(...ex.sets.map(s => setScore(name, s))),
+      sets: ex.sets,
     });
   }
   return out;
@@ -218,7 +262,7 @@ function isStalled(perf) {
   return a.kg > 0 && a.kg === b.kg && b.kg === c.kg && c.reps <= a.reps;
 }
 
-// Needs a new exercise: 6 sessions in a row without beating the best estimated 1RM from before them.
+// Needs a new exercise: 6 sessions in a row without beating the best score from before them.
 function needsRefresh(perf) {
   if (perf.length < 7) return false;
   const before = Math.max(...perf.slice(0, -6).map(p => p.e1rm));
@@ -233,17 +277,32 @@ function roundTo(kg, step) {
 // Three sessions stuck at the same weight: drop about 10 % and build back up (deload).
 function suggestion(ex, history) {
   const last = lastPerformance(history, ex.name);
-  if (ex.pattern === "core") return { kg: null, last, text: `Hold ${ex.reps}.` };
-  if (!last) return { kg: null, last, text: "First time: pick a weight you can lift for the top of the range with 2–3 reps left." };
+  if (isTimed(ex)) return { kg: null, last, text: `Hold ${ex.reps}.` };
+  if (!last) {
+    return { kg: null, last, text: isAssisted(ex.name)
+      ? "First time: pick the help (kg) that lets you reach the top of the range with 2–3 reps left. Less kg is harder."
+      : "First time: pick a weight you can lift for the top of the range with 2–3 reps left." };
+  }
   const perf = performances(history, ex.name);
+  const top = topReps(ex.reps);
+  const hitTop = last.sets.length >= ex.sets && last.sets.every(s => s.reps >= top);
+
+  if (isAssisted(ex.name)) {
+    const kg = Math.min(...last.sets.map(s => s.kg || 0));
+    if (isStalled(perf)) return { kg: kg + 5, last, deload: true, text: `Stuck at ${kg} kg of help for 3 sessions. Go up to ${kg + 5} kg of help and build back.` };
+    if (hitTop && kg > 0) {
+      const to = Math.max(0, kg - 5);
+      return { kg: to, last, text: `You hit ${top} reps on every set. Use less help: ${to} kg.` };
+    }
+    return { kg, last, text: hitTop ? "No help needed any more. Beat last time's reps." : `Stay at ${kg} kg of help and beat last time's reps.` };
+  }
+
   if (isStalled(perf)) {
     const from = perf[perf.length - 1].kg;
     const to = Math.max(increment(ex.pattern), roundTo(from * 0.9, 2.5));
     return { kg: to, last, deload: true, text: `Stuck at ${from} kg for 3 sessions. Drop to ${to} kg (about −10 %) and build back up.` };
   }
   const kg = Math.max(...last.sets.map(s => s.kg || 0));
-  const top = topReps(ex.reps);
-  const hitTop = last.sets.length >= ex.sets && last.sets.every(s => s.reps >= top);
   if (kg > 0 && hitTop) {
     const inc = increment(ex.pattern);
     return { kg: kg + inc, last, text: `You hit ${top} reps on every set. Add ${inc} kg.` };
@@ -251,8 +310,33 @@ function suggestion(ex, history) {
   return { kg: kg || null, last, text: kg ? `Stay at ${kg} kg and beat last time's reps.` : "Beat last time's reps." };
 }
 
-function sessionVolume(entry) {
-  return Math.round(entry.exercises.reduce((sum, e) => sum + e.sets.reduce((s2, st) => s2 + (st.kg || 0) * (st.reps || 0), 0), 0));
+// Dumbbell lifts that run out of dumbbell before you run out of strength.
+const OUTGROWN = {
+  "Goblet squat": { kg: 30, alt: "Hack squat" },
+  "Dumbbell Romanian deadlift": { kg: 30, alt: "Barbell Romanian deadlift" },
+};
+
+function outgrown(name, history) {
+  const o = OUTGROWN[name];
+  const last = o && lastPerformance(history, name);
+  return last && Math.max(...last.sets.map(s => s.kg || 0)) >= o.kg ? o : null;
 }
 
-if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, SPLITS, buildProgram, bodyStats, DAY_NAMES, topReps, suggestion, lastPerformance, sessionVolume, performances, isStalled, needsRefresh };
+// Warm-up sets before a main lift, from the working weight. The first main lift of the day gets two.
+function warmup(kg, first) {
+  if (!(kg >= 20)) return "";
+  const at = f => Math.max(2.5, roundTo(kg * f, 2.5));
+  return first ? `Warm-up: ${at(0.5)} kg × 8, then ${at(0.75)} kg × 4.` : `Warm-up: ${at(0.7)} kg × 5.`;
+}
+
+// Help on an assisted machine is not weight lifted, so it stays out of the volume.
+function exerciseVolume(ex) {
+  if (isAssisted(ex.name)) return 0;
+  return ex.sets.reduce((v, s) => v + (s.kg || 0) * (s.reps || 0), 0);
+}
+
+function sessionVolume(entry) {
+  return Math.round(entry.exercises.reduce((sum, e) => sum + exerciseVolume(e), 0));
+}
+
+if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, SPLITS, buildProgram, bodyStats, DAY_NAMES, topReps, suggestion, lastPerformance, sessionVolume, performances, isStalled, needsRefresh, isAssisted, isTimed, applyName, toNum, bestSet, setScore, exerciseVolume, warmup, outgrown };

@@ -1,7 +1,11 @@
 // XP, levels, weekly quests, streaks, personal records and badges.
 // Everything is computed from the saved history, so editing or deleting an entry updates it too.
 
-const XP = { workout: 100, perSet: 5, perCardioMin: 1, perClimb10m: 1, pr: 50, quest: 150 };
+if (typeof require !== "undefined" && typeof isAssisted === "undefined") {
+  ({ isAssisted, bestSet, exerciseVolume } = require("./program.js"));
+}
+
+const XP = { workout: 100, perSet: 5, perCardioMin: 1, perClimb10m: 1, pr: 50, repPr: 20, quest: 150 };
 
 const LEVEL_TITLES = ["Rookie", "Regular", "Grinder", "Iron", "Steel", "Machine", "Beast", "Titan", "Legend"];
 
@@ -69,7 +73,7 @@ const BADGES = [
 function gamify(history, weights, profile, today) {
   const gymGoal = profile.trainDays.length;
   const entries = [...history].sort((a, b) => a.date.localeCompare(b.date));
-  const best = {}; // exercise name -> heaviest kg so far
+  const best = {}; // exercise name -> best weight so far and the top set of every session
   const weeks = {}; // monday -> weekly totals
   const week = m => (weeks[m] = weeks[m] || { gym: 0, cardioMin: 0, climb: 0, prs: 0, weighIns: 0, sets: 0, outdoor: 0 });
   const s = { xp: 0, workouts: 0, prs: 0, hikes: 0, climb: 0, outdoorKm: 0, maxVolume: 0, quests: 0, bestStreak: 0, prList: [] };
@@ -84,16 +88,27 @@ function gamify(history, weights, profile, today) {
       w.sets += sets;
       let volume = 0;
       for (const ex of e.exercises) {
-        const top = Math.max(...ex.sets.map(x => x.kg || 0));
-        volume += ex.sets.reduce((v, x) => v + (x.kg || 0) * (x.reps || 0), 0);
-        // A PR beats an earlier best; the first time doing an exercise only sets the baseline.
-        if (top > 0 && best[ex.name] !== undefined && top > best[ex.name]) {
+        volume += exerciseVolume(ex);
+        // Compare on one scale: for assisted exercises less help is better, so flip the sign.
+        const sign = isAssisted(ex.name) ? -1 : 1;
+        const top = bestSet(ex.name, ex.sets);
+        const kg = sign * (top.kg || 0), reps = top.reps || 0;
+        const b = best[ex.name];
+        // Most reps done so far at this weight or heavier.
+        const repsAt = b ? Math.max(0, ...b.sets.filter(x => x.kg >= kg).map(x => x.reps)) : 0;
+        // A record beats an earlier best; the first time doing an exercise only sets the baseline.
+        let type = null;
+        if (b && kg > b.kg && (sign < 0 || kg > 0)) type = "weight";
+        else if (b && reps > repsAt && repsAt > 0) type = "reps";
+        if (type) {
           s.prs++;
           w.prs++;
-          s.xp += XP.pr;
-          s.prList.push({ date: e.date, name: ex.name, kg: top });
+          s.xp += type === "weight" ? XP.pr : XP.repPr;
+          s.prList.push({ date: e.date, name: ex.name, kg: top.kg || 0, reps, type });
         }
-        if (top > 0) best[ex.name] = Math.max(best[ex.name] || 0, top);
+        const nb = b || (best[ex.name] = { kg, sets: [] });
+        nb.kg = Math.max(nb.kg, kg);
+        nb.sets.push({ kg, reps });
       }
       s.maxVolume = Math.max(s.maxVolume, volume);
     }
