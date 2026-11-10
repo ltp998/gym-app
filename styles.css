@@ -120,6 +120,13 @@ select {
 .day.hike { background: #2e2615; }
 .day.hike b { color: var(--warn); }
 .day.today { outline: 2px solid var(--text); }
+.day { position: relative; }
+.day.did::after { content: "✓"; position: absolute; top: -5px; right: -3px; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 11px; line-height: 16px; font-weight: 700; }
+.warm { color: var(--muted); margin: 0 0 4px; }
+.group { margin: 14px 0 2px; }
+.group:first-of-type { margin-top: 0; }
+button.lift { width: 100%; background: none; border: 0; border-top: 1px solid var(--border); color: var(--text); font: inherit; text-align: left; }
+.hist-row { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
 
 .note { border-left: 3px solid var(--warn); padding: 4px 0 4px 12px; margin: 10px 0 0; font-size: 14px; color: var(--muted); }
 

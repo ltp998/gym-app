@@ -61,7 +61,10 @@ function program() {
   }
   for (const w of p.workouts) {
     for (const ex of w.exercises) {
-      if (state.swaps[ex.key]) ex.name = state.swaps[ex.key];
+      // A saved swap only applies while it still fits the slot (templates can change between versions).
+      const swap = state.swaps[ex.key];
+      if (swap && PATTERNS[ex.pattern].options.includes(swap)) ex.name = swap;
+      applyName(ex);
     }
   }
   return p;
@@ -117,10 +120,10 @@ function renderSetup() {
         <input id="f-name" value="${esc(d.name)}" autocomplete="given-name">
         <div class="row">
           <div><label for="f-age">Age</label><input id="f-age" type="number" inputmode="numeric" value="${esc(d.age)}"></div>
-          <div><label for="f-h">Height (cm)</label><input id="f-h" type="number" inputmode="decimal" value="${esc(d.heightCm)}"></div>
+          <div><label for="f-h">Height (cm)</label><input id="f-h" type="text" inputmode="decimal" value="${esc(d.heightCm)}"></div>
         </div>
         <label for="f-w">Weight (kg)</label>
-        <input id="f-w" type="number" inputmode="decimal" value="${esc(d.weightKg)}">
+        <input id="f-w" type="text" inputmode="decimal" value="${esc(d.weightKg)}">
       </div>`;
   } else if (setupStep === 1) {
     body = `
@@ -182,8 +185,8 @@ function renderSetup() {
     if (setupStep === 0) {
       d.name = document.getElementById("f-name").value.trim();
       d.age = Number(document.getElementById("f-age").value);
-      d.heightCm = Number(document.getElementById("f-h").value);
-      d.weightKg = Number(document.getElementById("f-w").value);
+      d.heightCm = toNum(document.getElementById("f-h").value);
+      d.weightKg = toNum(document.getElementById("f-w").value);
       if (!(d.age >= 13 && d.age <= 99)) return (err.textContent = "Enter an age between 13 and 99.");
       if (!(d.heightCm >= 120 && d.heightCm <= 230)) return (err.textContent = "Enter your height in cm, for example 180.");
       if (!(d.weightKg >= 35 && d.weightKg <= 250)) return (err.textContent = "Enter your weight in kg, for example 80.");
@@ -215,9 +218,12 @@ function renderSetup() {
 function weekStrip(p, selected) {
   const t = todayIndex();
   const byId = Object.fromEntries(p.workouts.map(w => [w.id, w]));
+  // Days of this week that already have a workout or outdoor entry get a tick.
+  const monday = mondayOf(todayISO());
+  const did = new Set(state.history.map(e => e.date));
   return `<div class="week">` + p.week.map(d => {
     const w = d.workoutId && byId[d.workoutId];
-    const cls = ["day", w ? "train" : d.hike ? "hike" : "", d.day === selected ? "today" : ""].join(" ");
+    const cls = ["day", w ? "train" : d.hike ? "hike" : "", d.day === selected ? "today" : "", did.has(addDays(monday, d.day)) ? "did" : ""].join(" ");
     const label = w ? w.name.replace("Full body", "FB").replace("Upper", "Up").replace("Lower", "Low") : d.hike ? "Flex" : "Rest";
     return `<button class="${cls}" data-day="${d.day}">${d.day === t ? "Today" : d.name}<b>${esc(label)}</b></button>`;
   }).join("") + `</div>`;
@@ -253,8 +259,8 @@ function dayPlan(p, d, withSwap) {
   const changed = day.changed ? " · changed" : "";
 
   if (day.workoutId) {
-    return `<div class="eyebrow">${when}${changed}${doneToday ? " · done ✓" : ""}</div>` + workoutCard(byId[day.workoutId], withSwap) +
-      start(day.workoutId, doneToday ? "Start again" : "Start workout") + change;
+    return `<div class="eyebrow">${when}${changed}${doneToday ? " · done ✓" : ""}</div>` +
+      start(day.workoutId, doneToday ? "Start again" : "Start workout") + workoutCard(byId[day.workoutId], withSwap) + change;
   }
 
   if (day.hike) {
@@ -269,8 +275,8 @@ function dayPlan(p, d, withSwap) {
         <p><b>Gym</b><br><span class="muted small">The optional session below. Go lighter if you are tired from the week.</span></p>
         ${withSwap ? "" : `<button class="btn secondary" id="flex-outdoor">Log hike or outdoor cardio</button>`}
       </div>
-      <div class="eyebrow">Optional gym${doneToday ? " · done ✓" : ""}</div>` + workoutCard(optional, withSwap) +
-      start(optional.id, "Start gym session") + change;
+      <div class="eyebrow">Optional gym${doneToday ? " · done ✓" : ""}</div>` +
+      start(optional.id, "Start gym session") + workoutCard(optional, withSwap) + change;
   }
 
   let next = null;
@@ -445,18 +451,26 @@ async function exportData() {
   // Stamp the date into the file itself, so a restore can say how old it is.
   const file = new File([JSON.stringify({ ...state, active: null, lastBackup: todayISO() }, null, 2)], name, { type: "application/json" });
   // iOS: the share sheet lets you save to Files or send it to yourself.
+  let shared = false;
   if (navigator.canShare && navigator.canShare({ files: [file] })) {
     try {
       await navigator.share({ files: [file], title: "Gym backup" });
+      shared = true;
     } catch (err) {
       if (err.name === "AbortError") return; // closed the share sheet without saving
     }
-  } else {
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(file);
-    a.download = name;
-    a.click();
-    URL.revokeObjectURL(a.href);
+  }
+  if (!shared) {
+    // No share sheet, or it failed: download the file instead.
+    try {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(file);
+      a.download = name;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch {
+      return alert("The backup could not be saved. Try again.");
+    }
   }
   state.lastBackup = todayISO();
   save();

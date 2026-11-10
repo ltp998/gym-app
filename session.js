@@ -39,6 +39,8 @@ function startWorkout(workoutId, date) {
     exercises: w.exercises.map(ex => {
       const sug = suggestion(ex, history);
       if (!date && needsRefresh(performances(history, ex.name))) sug.text += " No progress in 6 sessions: consider a swap in the Program tab.";
+      const big = !date && outgrown(ex.name, history);
+      if (big) sug.text += ` You are near the heaviest dumbbells: consider ${big.alt} (swap in the Program tab).`;
       return {
         ...ex,
         tip: sug.text,
@@ -50,6 +52,22 @@ function startWorkout(workoutId, date) {
   state.restEnd = null;
   save();
   render();
+}
+
+// Minutes since the start. Over 3 hours means Finish was forgotten, so use the planned length instead.
+function sessionMinutes(started) {
+  const min = Math.max(1, Math.round((Date.now() - started) / 60000));
+  return min > 180 ? state.profile.sessionMin : min;
+}
+
+// "30 kg × 10", "× 12" for bodyweight, "20 kg help × 8" for assisted machines.
+function fmtSet(name, s) {
+  if (isAssisted(name)) return `${s.kg || 0} kg help × ${s.reps}`;
+  return s.kg ? `${s.kg} kg × ${s.reps}` : `× ${s.reps}`;
+}
+
+function fmtRecord(p) {
+  return p.type === "reps" || isAssisted(p.name) ? `${esc(p.name)} ${fmtSet(p.name, p)}` : `${esc(p.name)} ${p.kg} kg`;
 }
 
 function game() {
@@ -64,15 +82,15 @@ function finishWorkout() {
     date: a.date || isoOf(a.started),
     workoutId: a.workoutId,
     name: a.name,
-    minutes: a.date ? state.profile.sessionMin : Math.max(1, Math.round((Date.now() - a.started) / 60000)),
+    minutes: a.date ? state.profile.sessionMin : sessionMinutes(a.started),
     exercises: a.exercises.map(ex => ({
       name: ex.name,
       pattern: ex.pattern,
-      sets: ex.log.filter(s => s.done).map(s => ({ kg: Number(s.kg) || 0, reps: Number(s.reps) || 0 })),
+      sets: ex.log.filter(s => s.done).map(s => ({ kg: toNum(s.kg), reps: Math.round(toNum(s.reps)) })),
     })).filter(ex => ex.sets.length),
   };
   const c = a.cardio || {};
-  if (Number(c.min) > 0) entry.cardio = { type: c.type || "Cardio", min: Number(c.min), km: Number(c.km) || 0 };
+  if (toNum(c.min) > 0) entry.cardio = { type: c.type || "Cardio", min: toNum(c.min), km: toNum(c.km) };
   const hasData = entry.exercises.length || entry.cardio;
   if (!hasData) {
     if (!confirm("No sets are ticked off. End the workout without saving?")) return;
@@ -98,7 +116,7 @@ function rewardsHtml(before, after, date) {
       <b class="xp-gain">+${gained} XP</b>
       ${after.level > before.level ? `<div class="levelup">Level up! You are now level ${after.level} · ${esc(after.title)}</div>` : ""}
       ${xpBar(after)}
-      ${newPrs.map(p => `<div class="reward-line">📈 New record: ${esc(p.name)} ${p.kg} kg</div>`).join("")}
+      ${newPrs.map(p => `<div class="reward-line">📈 New record: ${fmtRecord(p)}</div>`).join("")}
       ${questsDone.map(q => `<div class="reward-line">🎯 Quest done: ${esc(q.text)}</div>`).join("")}
       ${newBadges.map(b => `<div class="reward-line">${b.icon} Badge unlocked: ${esc(b.name)}</div>`).join("")}
     </div>`;
@@ -137,6 +155,8 @@ function showSummary(entry, before, after) {
 function renderSession() {
   const a = state.active;
   title.textContent = a.name;
+  const firstMain = a.exercises.findIndex(ex => ex.main && !isAssisted(ex.name));
+  const warm = (ex, i) => (!a.date && ex.main && !isAssisted(ex.name) ? warmup(toNum(ex.log[0] && ex.log[0].kg), i === firstMain) : "");
   app.innerHTML = `
     <div class="eyebrow">${a.date ? `Adding a past workout · ${fmtDate(a.date)}` : `In progress · <span id="elapsed">${fmtClock((Date.now() - a.started) / 1000)}</span>`}</div>
     ${a.exercises.map((ex, i) => `
@@ -148,11 +168,12 @@ function renderSession() {
         <button class="link swap-now" data-swap="${i}">Machine busy? Swap for today</button>
         ${ex.last ? `<div class="muted small">Last time: ${esc(ex.last)}</div>` : ""}
         <div class="tip small">${esc(ex.tip)}</div>
-        <div class="set-row set-head"><span>Set</span><span>kg</span><span>${ex.pattern === "core" ? "sec" : "reps"}</span><span></span></div>
+        ${warm(ex, i) ? `<div class="warm small">${esc(warm(ex, i))}</div>` : ""}
+        <div class="set-row set-head"><span>Set</span><span>${isAssisted(ex.name) ? "kg help" : "kg"}</span><span>${isTimed(ex) ? "sec" : "reps"}</span><span></span></div>
         ${ex.log.map((s, j) => `
           <div class="set-row ${s.done ? "done" : ""}">
             <span class="set-n">${j + 1}</span>
-            <input type="number" inputmode="decimal" step="0.5" value="${esc(s.kg)}" data-ex="${i}" data-set="${j}" data-field="kg" placeholder="–">
+            <input type="text" inputmode="decimal" value="${esc(s.kg)}" data-ex="${i}" data-set="${j}" data-field="kg" placeholder="–">
             <input type="number" inputmode="numeric" value="${esc(s.reps)}" data-ex="${i}" data-set="${j}" data-field="reps" placeholder="${topReps(ex.reps)}">
             <button class="check" data-ex="${i}" data-set="${j}" aria-label="Set done">✓</button>
           </div>`).join("")}
@@ -164,7 +185,7 @@ function renderSession() {
       ${chips("cardioType", CARDIO_TYPES.map(t => [t, t]), (a.cardio || {}).type || "")}
       <div class="row">
         <div><label for="c-min">Minutes</label><input id="c-min" type="number" inputmode="numeric" value="${esc((a.cardio || {}).min || "")}" placeholder="0"></div>
-        <div><label for="c-km">Distance (km, optional)</label><input id="c-km" type="number" inputmode="decimal" step="0.1" value="${esc((a.cardio || {}).km || "")}" placeholder="–"></div>
+        <div><label for="c-km">Distance (km, optional)</label><input id="c-km" type="text" inputmode="decimal" value="${esc((a.cardio || {}).km || "")}" placeholder="–"></div>
       </div>
     </div>
     <button class="btn" id="finish">Finish workout</button>
@@ -235,7 +256,11 @@ function renderSession() {
 
 function startRest(seconds) {
   // iOS only plays sound from an AudioContext created during a tap.
-  try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); } catch {}
+  // After the app was in the background iOS pauses the context, so wake it up on every tap.
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state !== "running") audioCtx.resume();
+  } catch {}
   state.restEnd = Date.now() + seconds * 1000;
   save();
 }
@@ -300,6 +325,23 @@ function sparkline(values) {
   return `<svg class="spark" viewBox="0 0 100 30" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`;
 }
 
+let showAllActivity = false;
+
+// Every session of one lift, newest first.
+function openLift(name) {
+  const perf = performances(state.history, name).reverse();
+  const weighted = !isAssisted(name) && perf.some(x => x.kg > 0);
+  openSheet(`
+    <h3>${esc(name)}</h3>
+    <p class="muted small">${perf.length} ${perf.length === 1 ? "session" : "sessions"}${weighted ? " · est. 1RM is a strength estimate from weight and reps" : ""}</p>
+    ${perf.map(x => `
+      <div class="hist-row">
+        <div><b>${fmtDate(x.date)}</b><div class="muted small">${x.sets.map(s => (s.kg ? `${s.kg}×${s.reps}` : `${s.reps}`)).join(", ")}</div></div>
+        ${weighted ? `<span class="muted small">est. 1RM ${Math.round(x.e1rm)} kg</span>` : ""}
+      </div>`).join("")}
+    <button class="btn secondary" data-close>Close</button>`, () => {});
+}
+
 function renderProgress() {
   title.textContent = "Progress";
   const h = state.history;
@@ -314,17 +356,25 @@ function renderProgress() {
   const kmWeek = Math.round(outdoorWeek.reduce((m, e) => m + (e.outdoor.km || 0), 0) * 10) / 10;
   const elevWeek = outdoorWeek.reduce((m, e) => m + (e.outdoor.elev || 0), 0);
 
-  // Heaviest set per session for each exercise, oldest first.
-  const byName = {};
-  for (const e of h) {
-    for (const ex of e.exercises) {
-      const top = Math.max(...ex.sets.map(s => s.kg || 0));
-      const best = ex.sets.reduce((b, s) => (s.kg > b.kg || (s.kg === b.kg && s.reps > b.reps) ? s : b), { kg: 0, reps: 0 });
-      (byName[ex.name] = byName[ex.name] || { points: [], best: { kg: 0, reps: 0 } }).points.push(top);
-      const b = byName[ex.name].best;
-      if (best.kg > b.kg || (best.kg === b.kg && best.reps > b.reps)) byName[ex.name].best = best;
-    }
+  // Lifts grouped by the workout they belong to now; exercises no longer in the program go last.
+  const logged = [...new Set(h.flatMap(e => e.exercises.map(ex => ex.name)))];
+  const groups = [];
+  const placed = new Set();
+  for (const w of program().workouts) {
+    const names = w.exercises.map(ex => ex.name).filter(n => logged.includes(n) && !placed.has(n));
+    names.forEach(n => placed.add(n));
+    if (names.length) groups.push({ name: w.name, names });
   }
+  const rest = logged.filter(n => !placed.has(n));
+  if (rest.length) groups.push({ name: "Earlier exercises", names: rest });
+  const liftRow = name => {
+    const perf = performances(h, name);
+    const best = bestSet(name, perf.flatMap(x => x.sets));
+    return `<button class="lift" data-lift="${esc(name)}">
+        <div><div class="name">${esc(name)}</div><div class="muted small">Best ${fmtSet(name, best)} · ${perf.length} ${perf.length === 1 ? "session" : "sessions"} · last ${fmtDate(perf[perf.length - 1].date)}</div></div>
+        ${sparkline(perf.map(x => x.e1rm))}
+      </button>`;
+  };
   const weights = state.weights;
 
   const g = game();
@@ -343,7 +393,7 @@ function renderProgress() {
     <div class="card">
       <h3>Body weight</h3>
       <div class="inline-form">
-        <input id="bw" type="number" inputmode="decimal" step="0.1" placeholder="${state.profile.weightKg}">
+        <input id="bw" type="text" inputmode="decimal" placeholder="${state.profile.weightKg}">
         <button class="btn small-btn" id="bw-save">Log kg</button>
       </div>
       ${weights.length ? `<p class="muted small">Latest ${weights[weights.length - 1].kg} kg on ${fmtDate(weights[weights.length - 1].date)}${weights.length > 1 ? ` · ${(weights[weights.length - 1].kg - weights[0].kg >= 0 ? "+" : "")}${(weights[weights.length - 1].kg - weights[0].kg).toFixed(1)} kg since ${fmtDate(weights[0].date)}` : ""}</p>` : `<p class="muted small">Weigh yourself in the morning, once a week, for a fair comparison.</p>`}
@@ -354,31 +404,38 @@ function renderProgress() {
       <div class="badges">
         ${g.badges.map(b => `<div class="badge ${b.earned ? "earned" : ""}"><span>${b.earned ? b.icon : "🔒"}</span>${esc(b.name)}</div>`).join("")}
       </div>
-      ${g.prList.length ? `<h3 class="sub">Latest records</h3>` + g.prList.slice(-5).reverse().map(p => `<div class="muted small">📈 ${fmtDate(p.date)} · ${esc(p.name)} ${p.kg} kg</div>`).join("") : ""}
+      ${g.prList.length ? `<h3 class="sub">Latest records</h3>` + g.prList.slice(-5).reverse().map(p => `<div class="muted small">📈 ${fmtDate(p.date)} · ${fmtRecord(p)}</div>`).join("") : ""}
     </div>
     <div class="card">
       <h3>Lifts</h3>
-      ${Object.keys(byName).length ? Object.entries(byName).map(([name, d]) => `
-        <div class="lift">
-          <div><div class="name">${esc(name)}</div><div class="muted small">Best ${d.best.kg ? `${d.best.kg} kg × ${d.best.reps}` : `${d.best.reps}`} · ${d.points.length} ${d.points.length === 1 ? "session" : "sessions"}</div></div>
-          ${sparkline(d.points)}
-        </div>`).join("") : `<p class="muted small">Finish your first workout and your lifts show up here.</p>`}
+      ${groups.length ? `<p class="muted small">The line shows estimated strength (weight and reps together). Tap a lift for its history.</p>` + groups.map(g => `
+        <div class="eyebrow group">${esc(g.name)}</div>
+        ${g.names.map(liftRow).join("")}`).join("") : `<p class="muted small">Finish your first workout and your lifts show up here.</p>`}
     </div>
     <div class="card">
       <h3>Recent activity</h3>
-      ${h.length ? `<p class="muted small">Tap an entry to fix a typo or delete it.</p>` + h.map((e, i) => ({ e, i })).slice(-20).reverse().map(({ e, i }) => `
+      ${h.length ? `<p class="muted small">Tap an entry to fix a typo or delete it.</p>` + h.map((e, i) => ({ e, i })).slice(showAllActivity ? 0 : -20).reverse().map(({ e, i }) => `
         <button class="lift entry" data-entry="${i}">
           <div><div class="name">${esc(e.name)}</div><div class="muted small">${fmtDate(e.date)} · ${entrySummary(e)}</div></div>
           <b>${e.outdoor ? `${e.outdoor.km || 0} km` : `${sessionVolume(e).toLocaleString("en")} kg`}</b>
-        </button>`).join("") : `<p class="muted small">No workouts yet.</p>`}
+        </button>`).join("") + (h.length > 20 && !showAllActivity ? `<button class="btn secondary" id="show-all">Show all ${h.length} entries</button>` : "") : `<p class="muted small">No workouts yet.</p>`}
     </div>`;
+
+  const sa = document.getElementById("show-all");
+  if (sa) sa.onclick = () => {
+    showAllActivity = true;
+    const y = window.scrollY;
+    render();
+    window.scrollTo(0, y);
+  };
+  app.querySelectorAll("[data-lift]").forEach(b => b.onclick = () => openLift(b.dataset.lift));
 
   document.getElementById("log-outdoor").onclick = () => openOutdoor();
   document.getElementById("add-past").onclick = openAddPast;
   app.querySelectorAll("[data-entry]").forEach(b => b.onclick = () => openEntryEditor(Number(b.dataset.entry)));
 
   document.getElementById("bw-save").onclick = () => {
-    const kg = Number(document.getElementById("bw").value);
+    const kg = toNum(document.getElementById("bw").value);
     if (!(kg >= 35 && kg <= 250)) return;
     const date = todayISO();
     state.weights = state.weights.filter(w => w.date !== date);
@@ -434,6 +491,7 @@ function openSessionSwap(i) {
     <button class="btn secondary" data-close>Cancel</button>`, wrap => {
     wrap.querySelectorAll("[data-name]").forEach(b => b.onclick = () => {
       ex.name = b.dataset.name;
+      applyName(ex);
       const sug = suggestion(ex, state.history);
       ex.tip = sug.text;
       ex.last = sug.last ? sug.last.sets.map(s => s.kg ? `${s.kg}×${s.reps}` : `${s.reps}`).join(", ") : "";
@@ -455,11 +513,11 @@ function openOutdoor() {
     ${chips("outType", OUTDOOR_TYPES.map(t => [t, t]), o.type)}
     <div class="row">
       <div><label for="o-min">Minutes</label><input id="o-min" type="number" inputmode="numeric" placeholder="120"></div>
-      <div><label for="o-km">Distance (km)</label><input id="o-km" type="number" inputmode="decimal" step="0.1" placeholder="8"></div>
+      <div><label for="o-km">Distance (km)</label><input id="o-km" type="text" inputmode="decimal" placeholder="8"></div>
     </div>
     <div class="row">
       <div><label for="o-elev">Climbed (m)</label><input id="o-elev" type="number" inputmode="numeric" placeholder="600"></div>
-      <div><label for="o-date">Date</label><input id="o-date" type="date" value="${todayISO()}"></div>
+      <div><label for="o-date">Date</label><input id="o-date" type="date" value="${todayISO()}" max="${todayISO()}"></div>
     </div>
     <p class="muted small" id="o-err"></p>
     <button class="btn" id="o-save">Save</button>
@@ -468,12 +526,14 @@ function openOutdoor() {
     wrap.querySelector("#o-save").onclick = () => {
       const min = Number(wrap.querySelector("#o-min").value);
       if (!(min > 0)) return (wrap.querySelector("#o-err").textContent = "Enter how many minutes it took.");
+      const date = wrap.querySelector("#o-date").value || todayISO();
+      if (date > todayISO()) return (wrap.querySelector("#o-err").textContent = "Pick today or a past date.");
       const entry = {
-        date: wrap.querySelector("#o-date").value || todayISO(),
+        date,
         name: o.type,
         minutes: min,
         exercises: [],
-        outdoor: { type: o.type, min, km: Number(wrap.querySelector("#o-km").value) || 0, elev: Number(wrap.querySelector("#o-elev").value) || 0 },
+        outdoor: { type: o.type, min, km: toNum(wrap.querySelector("#o-km").value), elev: Number(wrap.querySelector("#o-elev").value) || 0 },
       };
       const before = game();
       state.history.push(entry);
@@ -495,7 +555,7 @@ function openEntryEditor(idx) {
     body = `
       <div class="row">
         <div><label>Minutes</label><input data-f="min" type="number" inputmode="numeric" value="${num(e.outdoor.min)}"></div>
-        <div><label>Distance (km)</label><input data-f="km" type="number" inputmode="decimal" step="0.1" value="${num(e.outdoor.km)}"></div>
+        <div><label>Distance (km)</label><input data-f="km" type="text" inputmode="decimal" value="${num(e.outdoor.km)}"></div>
       </div>
       <label>Climbed (m)</label><input data-f="elev" type="number" inputmode="numeric" value="${num(e.outdoor.elev)}">`;
   } else {
@@ -505,7 +565,7 @@ function openEntryEditor(idx) {
         ${ex.sets.map((s, j) => `
           <div class="set-row">
             <span class="set-n">${j + 1}</span>
-            <input type="number" inputmode="decimal" step="0.5" value="${num(s.kg)}" data-ex="${i}" data-set="${j}" data-k="kg" placeholder="kg">
+            <input type="text" inputmode="decimal" value="${num(s.kg)}" data-ex="${i}" data-set="${j}" data-k="kg" placeholder="kg">
             <input type="number" inputmode="numeric" value="${num(s.reps)}" data-ex="${i}" data-set="${j}" data-k="reps" placeholder="reps">
             <button class="check del" data-del="${i}-${j}" aria-label="Remove set">✕</button>
           </div>`).join("")}
@@ -513,13 +573,14 @@ function openEntryEditor(idx) {
       </div>`).join("") + (e.cardio ? `
       <div class="row">
         <div><label>${esc(e.cardio.type)} (min)</label><input data-c="min" type="number" inputmode="numeric" value="${num(e.cardio.min)}"></div>
-        <div><label>Distance (km)</label><input data-c="km" type="number" inputmode="decimal" step="0.1" value="${num(e.cardio.km)}"></div>
+        <div><label>Distance (km)</label><input data-c="km" type="text" inputmode="decimal" value="${num(e.cardio.km)}"></div>
       </div>` : "");
   }
   openSheet(`
     <div class="eyebrow">${fmtDate(e.date)}</div>
     <h3>Edit ${esc(e.name)}</h3>
-    <label>Date</label><input id="e-date" type="date" value="${e.date}">
+    <label>Date</label><input id="e-date" type="date" value="${e.date}" max="${todayISO()}">
+    ${e.outdoor ? "" : `<label>Duration (min)</label><input id="e-min" type="number" inputmode="numeric" value="${num(e.minutes)}">`}
     ${body}
     <button class="btn" id="e-save">Save changes</button>
     <button class="btn danger" id="e-delete">Delete this entry</button>
@@ -532,7 +593,7 @@ function openEntryEditor(idx) {
       b.insertAdjacentHTML("beforebegin", `
         <div class="set-row">
           <span class="set-n">${j + 1}</span>
-          <input type="number" inputmode="decimal" step="0.5" value="${prev.kg ?? ""}" data-ex="${i}" data-set="${j}" data-k="kg" placeholder="kg">
+          <input type="text" inputmode="decimal" value="${prev.kg ?? ""}" data-ex="${i}" data-set="${j}" data-k="kg" placeholder="kg">
           <input type="number" inputmode="numeric" data-ex="${i}" data-set="${j}" data-k="reps" placeholder="reps">
           <span></span>
         </div>`);
@@ -542,20 +603,23 @@ function openEntryEditor(idx) {
       b.closest(".set-row").remove();
     });
     wrap.querySelector("#e-save").onclick = () => {
-      e.date = wrap.querySelector("#e-date").value || e.date;
+      const newDate = wrap.querySelector("#e-date").value;
+      if (newDate && newDate <= todayISO()) e.date = newDate;
+      const minEl = wrap.querySelector("#e-min");
+      if (minEl && toNum(minEl.value) > 0) e.minutes = Math.round(toNum(minEl.value));
       if (e.outdoor) {
-        wrap.querySelectorAll("[data-f]").forEach(inp => (e.outdoor[inp.dataset.f] = Number(inp.value) || 0));
+        wrap.querySelectorAll("[data-f]").forEach(inp => (e.outdoor[inp.dataset.f] = toNum(inp.value)));
         e.minutes = e.outdoor.min;
       } else {
         wrap.querySelectorAll("[data-k]").forEach(inp => {
           const sets = e.exercises[inp.dataset.ex].sets;
           sets[inp.dataset.set] = sets[inp.dataset.set] || { kg: 0, reps: 0 }; // added rows
-          sets[inp.dataset.set][inp.dataset.k] = Number(inp.value) || 0;
+          sets[inp.dataset.set][inp.dataset.k] = toNum(inp.value);
         });
         e.exercises.forEach((ex, i) => (ex.sets = ex.sets.filter((s, j) => !removed.has(`${i}-${j}`) && (s.reps || s.kg))));
         e.exercises = e.exercises.filter(ex => ex.sets.length);
         if (e.cardio) {
-          wrap.querySelectorAll("[data-c]").forEach(inp => (e.cardio[inp.dataset.c] = Number(inp.value) || 0));
+          wrap.querySelectorAll("[data-c]").forEach(inp => (e.cardio[inp.dataset.c] = toNum(inp.value)));
           if (!e.cardio.min) delete e.cardio;
         }
       }
@@ -592,7 +656,7 @@ function questCard(g, full) {
           <span class="q-text">${esc(q.text)}</span>
           <span class="q-val">${q.value}${q.unit ? " " + q.unit : ""} / ${q.goal}${q.unit ? " " + q.unit : ""}</span>
         </div>`).join("")}
-      ${full ? `<p class="muted small">XP: workout 100 + 5 per set · cardio and outdoor 1 per minute · 1 per 10 m climbed · record 50 · quest 150. The streak counts weeks where you hit all your gym days.</p>` : ""}
+      ${full ? `<p class="muted small">XP: workout 100 + 5 per set · cardio and outdoor 1 per minute · 1 per 10 m climbed · weight record 50 · rep record 20 · quest 150. The streak counts weeks where you hit all your gym days.</p>` : ""}
     </div>`;
 }
 
@@ -626,6 +690,14 @@ function refreshCard(p) {
   const rows = [];
   for (const w of p.workouts) {
     for (const ex of w.exercises) {
+      const big = outgrown(ex.name, state.history);
+      if (big) {
+        rows.push(`<div class="lift">
+          <div><div class="name">${esc(ex.name)}</div><div class="muted small">${esc(w.name)} · near the heaviest dumbbells. Try ${esc(big.alt)}.</div></div>
+          <button class="btn secondary small-btn" data-refresh="${ex.key}" data-alt="${esc(big.alt)}">Swap</button>
+        </div>`);
+        continue;
+      }
       if (ex.pattern === "core" || !needsRefresh(performances(state.history, ex.name))) continue;
       const opts = PATTERNS[ex.pattern].options;
       const alt = opts[(opts.indexOf(ex.name) + 1) % opts.length];
