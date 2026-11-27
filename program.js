@@ -34,7 +34,11 @@ const PATTERNS = {
   biceps:   { main: false, pick: { new: "Cable curl", returning: "Dumbbell curl", experienced: "Dumbbell curl" },
               options: ["Dumbbell curl", "Cable curl", "Hammer curl", "EZ-bar curl"] },
   triceps:  { main: false, pick: { new: "Cable triceps pushdown", returning: "Cable triceps pushdown", experienced: "Overhead cable extension" },
-              options: ["Cable triceps pushdown", "Overhead cable extension", "Dips (assisted)"] },
+              options: ["Cable triceps pushdown", "Overhead cable extension", "EZ-bar skull crusher", "Dips (assisted)"] },
+  forearm:  { main: false, pick: { new: "Dumbbell wrist curl", returning: "Dumbbell wrist curl", experienced: "Dumbbell wrist curl" },
+              options: ["Dumbbell wrist curl", "Reverse dumbbell wrist curl", "Reverse-grip EZ-bar curl", "Cable wrist curl"] },
+  shrug:    { main: false, pick: { new: "Dumbbell shrug", returning: "Dumbbell shrug", experienced: "Dumbbell shrug" },
+              options: ["Dumbbell shrug", "Barbell shrug", "Shrug machine"] },
   core:     { main: false, pick: { new: "Dead bug", returning: "Plank", experienced: "Cable crunch" },
               options: ["Plank", "Dead bug", "Cable crunch", "Pallof press", "Hanging knee raise"] },
 };
@@ -71,6 +75,13 @@ const TEMPLATES = {
     { name: "Full body", focus: "full", slots: [{ p: "squat", alt: "Leg press" }, "hpush", { p: "vpull", alt: "Close-grip lat pulldown" }, { p: "legcurl", alt: "Lying leg curl" }, "lateral", "core", "calf"] },
   ],
 };
+
+// Extra workouts outside the weekly plan. Pick one with "Change today's workout" or from the Program tab.
+// Alternatives are chosen so no exercise shows up twice in the same workout at any level.
+const EXTRAS = [
+  { name: "Arms", focus: "upper", slots: [{ p: "biceps", alt: "EZ-bar curl" }, { p: "triceps", alt: "EZ-bar skull crusher" }, { p: "biceps", alt: "Hammer curl" }, "triceps", "forearm", { p: "forearm", alt: "Reverse dumbbell wrist curl" }, "biceps"] },
+  { name: "Shoulders", focus: "upper", slots: ["vpush", "lateral", "facepull", { p: "vpush", alt: "Landmine press" }, { p: "lateral", alt: "Lateral raise machine" }, "shrug"] },
+];
 
 const SPLITS = { auto: "Auto", ppl_fb: "Push, Pull, Legs + Full body" };
 
@@ -135,15 +146,17 @@ function buildProgram(profile) {
   const templates = profile.split === "ppl_fb" && days === 4 ? TEMPLATES.ppl_fb : TEMPLATES[days];
   const limit = MAX_EXERCISES[profile.sessionMin] || 6;
 
-  const workouts = templates.map((t, i) => ({
-    id: "w" + i,
+  const make = (prefix, extra) => (t, i) => ({
+    id: prefix + i,
     name: t.name,
     focus: t.focus,
+    extra,
     exercises: t.slots.slice(0, limit).map((slot, j) => {
       const pattern = slotPattern(slot);
-      return applyName({ key: `w${i}-${j}`, pattern, name: exerciseName(slot, profile.level), ...dose(pattern, profile) });
+      return applyName({ key: `${prefix}${i}-${j}`, pattern, name: exerciseName(slot, profile.level), ...dose(pattern, profile) });
     }),
-  }));
+  });
+  const workouts = templates.map(make("w", false));
 
   // Assign workouts to the chosen weekdays in order (0 = Monday).
   const trainDays = [...profile.trainDays].sort((a, b) => a - b).slice(0, days);
@@ -157,7 +170,9 @@ function buildProgram(profile) {
     };
   });
 
-  return { workouts, week, notes: programNotes(profile, workouts, week) };
+  // Extras come after the planned workouts, so the week above only uses planned ones.
+  const extras = EXTRAS.map(make("x", true));
+  return { workouts: [...workouts, ...extras], week, notes: programNotes(profile, workouts, week) };
 }
 
 function programNotes(profile, workouts, week) {
@@ -339,4 +354,4 @@ function sessionVolume(entry) {
   return Math.round(entry.exercises.reduce((sum, e) => sum + exerciseVolume(e), 0));
 }
 
-if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, SPLITS, buildProgram, bodyStats, DAY_NAMES, topReps, suggestion, lastPerformance, sessionVolume, performances, isStalled, needsRefresh, isAssisted, isTimed, applyName, toNum, bestSet, setScore, exerciseVolume, warmup, outgrown };
+if (typeof module !== "undefined") module.exports = { PATTERNS, TEMPLATES, EXTRAS, SPLITS, buildProgram, bodyStats, DAY_NAMES, topReps, suggestion, lastPerformance, sessionVolume, performances, isStalled, needsRefresh, isAssisted, isTimed, applyName, toNum, bestSet, setScore, exerciseVolume, warmup, outgrown };

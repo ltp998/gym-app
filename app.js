@@ -309,12 +309,15 @@ function openChangeDay() {
   const p = program();
   const current = p.week[todayIndex()].workoutId;
   const flex = p.week[todayIndex()].hike;
+  const opt = w => `<button class="option" data-w="${w.id}">${esc(w.name)}${w.id === current ? " ✓" : ""}</button>`;
   const wrap = document.createElement("div");
   wrap.className = "sheet-backdrop";
   wrap.innerHTML = `<div class="sheet">
     <h3>Today's workout</h3>
     <p class="muted small">Only today changes. The rest of your week stays as planned.</p>
-    ${p.workouts.map(w => `<button class="option" data-w="${w.id}">${esc(w.name)}${w.id === current ? " ✓" : ""}</button>`).join("")}
+    ${p.workouts.filter(w => !w.extra).map(opt).join("")}
+    <div class="eyebrow">Extra workouts</div>
+    ${p.workouts.filter(w => w.extra).map(opt).join("")}
     <button class="option" data-w="">Rest day${current === null && !flex ? " ✓" : ""}</button>
     ${state.dayOverride && state.dayOverride.date === todayISO() ? `<button class="option" data-reset>Back to the plan</button>` : ""}
     <button class="btn secondary" data-close>Cancel</button>
@@ -368,12 +371,15 @@ function renderProgram() {
   app.innerHTML = `
     <div class="card">
       <div class="eyebrow">Your plan</div>
-      <h2>${esc(goal)} · ${p.workouts.length} days a week</h2>
+      <h2>${esc(goal)} · ${p.workouts.filter(w => !w.extra).length} days a week</h2>
       <p class="muted small">Tap a day to see its plan.</p>
       ${weekStrip(p, selectedDay)}
     </div>
     ${refreshCard(p)}
     ${dayPlan(p, selectedDay, true)}
+    <div class="eyebrow">Extra workouts</div>
+    <p class="muted small">Not part of your week. Do one on a flexible day or instead of today's workout.</p>
+    ${p.workouts.filter(w => w.extra).map(w => workoutCard(w, true) + `<button class="btn secondary" data-today="${w.id}">Do ${esc(w.name)} today</button>`).join("")}
     <div class="card">
       <h3>Tips</h3>
       ${p.notes.map(n => `<p class="note">${esc(n)}</p>`).join("")}
@@ -382,6 +388,13 @@ function renderProgram() {
   bindDayTaps();
   app.querySelectorAll("[data-refresh]").forEach(b => b.onclick = () => {
     state.swaps[b.dataset.refresh] = b.dataset.alt;
+    save();
+    render();
+  });
+  app.querySelectorAll("[data-today]").forEach(b => b.onclick = () => {
+    state.dayOverride = { date: todayISO(), workoutId: b.dataset.today };
+    selectedDay = todayIndex();
+    tab = "today";
     save();
     render();
   });
